@@ -7,6 +7,13 @@
 This repo is one of four comparable migration experiments. The shape of every
 experiment is standardized so the results can be read side by side.
 
+## What's being migrated
+
+**SWT / Eclipse RCP** — desktop Java, in the same family as Swing. The trigger is
+familiar: a dying desktop UI toolkit and a team that wants to stay in Java rather than
+rewrite into a JavaScript stack. That makes this a strong net-new wedge — the audience
+isn't already on Vaadin, so the upside of a credible migration path is high.
+
 ## The question
 
 > **Can _\<the chosen SWT/RCP slice\>_ be moved to Vaadin, and where does it break?**
