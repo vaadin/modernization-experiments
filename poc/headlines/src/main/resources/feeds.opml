@@ -69,6 +69,30 @@
             <outline type="rss" text="Hacker News" xmlUrl="https://news.ycombinator.com/rss"/>
         </outline>
 
+        <outline text="Food" title="Food">
+            <outline type="rss" text="NYT Dining" xmlUrl="https://rss.nytimes.com/services/xml/rss/nyt/DiningandWine.xml"/>
+            <outline type="rss" text="Guardian Food" xmlUrl="https://www.theguardian.com/food/rss"/>
+            <outline type="rss" text="Smitten Kitchen" xmlUrl="https://smittenkitchen.com/feed/"/>
+        </outline>
+        <outline text="Internet" title="Internet">
+            <outline type="rss" text="Mashable" xmlUrl="https://mashable.com/feeds/rss/all"/>
+            <outline type="rss" text="The Next Web" xmlUrl="https://thenextweb.com/feed"/>
+            <outline type="rss" text="TorrentFreak" xmlUrl="https://torrentfreak.com/feed/"/>
+        </outline>
+        <outline text="Music" title="Music">
+            <outline type="rss" text="Pitchfork" xmlUrl="https://pitchfork.com/feed/feed-news/rss"/>
+            <outline type="rss" text="NPR Music" xmlUrl="https://feeds.npr.org/1039/rss.xml"/>
+            <outline type="rss" text="Stereogum" xmlUrl="https://www.stereogum.com/feed/"/>
+        </outline>
+        <outline text="Podcast" title="Podcast">
+            <outline type="rss" text="NPR Up First" xmlUrl="https://feeds.npr.org/510318/podcast.xml"/>
+            <outline type="rss" text="This American Life" xmlUrl="https://www.thisamericanlife.org/podcast/rss.xml"/>
+        </outline>
+        <outline text="Software" title="Software">
+            <outline type="rss" text="The GitHub Blog" xmlUrl="https://github.blog/feed/"/>
+            <outline type="rss" text="InfoQ" xmlUrl="https://feed.infoq.com/"/>
+        </outline>
+
         <!-- ===== ungrouped channels (top-level, like RSSOwl's root entries) ===== -->
         <outline type="rss" text="RSSOwlnix News" xmlUrl="https://xyrio.github.io/RSSOwlnix-site/updates.rss"/>
         <outline type="rss" text="CNN" xmlUrl="https://rss.cnn.com/rss/edition.rss"/>

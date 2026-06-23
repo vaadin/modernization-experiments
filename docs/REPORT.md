@@ -490,20 +490,27 @@ stable 64-bit id before building the tree.
 Comparing the running Vaadin tree against the RSSOwl "before" screenshot side by side, the human in
 the loop noted: *"there are fewer channels in the Vaadin version. Why?"* — a fair hit, and worth
 recording because it's the recurring shape of this experiment (the AI silently under-delivers
-fidelity; a human who knows the original has to keep checking). RSSOwl's tree has ~32 top-level rows;
-the PoC has ~14. Four distinct reasons, none of them "Vaadin can't":
+fidelity; a human who knows the original has to keep checking). The first cut had ~14 top-level rows
+vs RSSOwl's ~32. Four reasons, none "Vaadin can't" — and three are now closed in review:
 
-1. **Dropped 5 of 15 category folders** — Food, Internet, Music, Podcast, Software — because reliable
-   *current* free RSS for them is scarce (the 2009 URLs are dead). A sourcing problem, not a UI one.
-2. **Ungrouped channels under-represented** — RSSOwl lists BBC News, NYT, Guardian, TechCrunch, Wired
-   *both* inside folders *and* as loose top-level channels; the PoC originally only had them inside
-   folders. **(Fixed:)** these big outlets now also appear as top-level channels (a `FEATURED` set
-   surfaces them beside the genuinely-ungrouped feeds, no data duplication). Still absent: **CNN**
-   (SSL handshake fails), **Reuters** (killed public RSS), **RSSOwlnix News** (returned nothing).
+1. **~~Dropped 5 of 15 category folders~~ (Fixed.)** Food, Internet, Music, Podcast, Software are now
+   present too — all **15 RSSOwl categories** with current best-effort feeds (a few feeds are flaky,
+   e.g. Smitten Kitchen returns malformed XML and is skipped).
+2. **Ungrouped channels under-represented (Fixed.)** RSSOwl lists BBC News, NYT, Guardian, TechCrunch,
+   Wired *both* inside folders *and* as loose channels; a `FEATURED` set now surfaces them as
+   top-level channels too (no data duplication). Still absent: **CNN** (SSL handshake fails) and
+   **Reuters** (killed public RSS).
 3. **No saved-search smart folders** — RSSOwl's Unread News / Today's News / News with Attachments /
-   Sticky News / Labeled News are *saved searches*, a feature not built here (5 rows absent).
-4. **Counts are real-time and capped** (`MAX_ITEMS=800`) vs RSSOwl's *accumulated unread over time*
-   (Technology 846, Computers 394) — three current feeds fetched once ≠ years of retained articles.
+   Sticky News / Labeled News are *saved searches*, a feature not built here (5 rows still absent).
+4. **~~Counts arbitrary~~ (Fixed — copied RSSOwl's actual limit.)** Asked "is there a MAX_ITEMS in the
+   old software?", we found RSSOwl's `PreferencesInitializer`: count-based cleanup is **on by default**
+   at **200 news per feed** (`DEL_NEWS_BY_COUNT_VALUE = 200`). The PoC now applies that exact
+   **per-feed 200 cap** instead of an arbitrary global number, so per-category counts are real and
+   RSSOwl-scaled (Business 142, Podcast 213, Sports 175, Weblogs 167, …). Still differs from RSSOwl's
+   *accumulated unread over time* — one live fetch ≠ years of retained articles.
+
+So the tree now closely matches RSSOwl: 15 folders + ~10 ungrouped channels, governed by RSSOwl's own
+200/feed limit; only the 5 saved-search smart folders (and the two dead endpoints) remain.
 
 The honest takeaway for "can AI do this migration?": yes mechanically, but it will quietly produce a
 *plausible-looking* approximation that's missing pieces only someone familiar with the original will

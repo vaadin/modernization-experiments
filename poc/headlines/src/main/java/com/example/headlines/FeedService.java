@@ -42,14 +42,21 @@ import java.util.concurrent.TimeUnit;
 public class FeedService {
 
     private static final Logger log = LoggerFactory.getLogger(FeedService.class);
-    private static final int MAX_ITEMS = 800;
+    // RSSOwl keeps at most 200 news per feed by default (DEL_NEWS_BY_COUNT_VALUE = 200, with
+    // count-based cleanup on) — see RSSOwl's PreferencesInitializer. We copy that as a PER-FEED cap.
+    // MAX_ITEMS is then just a global memory safety net, not the real limit.
+    private static final int PER_FEED_MAX = 200;
+    private static final int MAX_ITEMS = 5000;
     private static final Duration PER_FEED_TIMEOUT = Duration.ofSeconds(8);
     private static final Map<String, String> CATEGORY_COLOR = Map.ofEntries(
             Map.entry("Business", "#1565c0"), Map.entry("Computers", "#37474f"),
-            Map.entry("Entertainment", "#6a1b9a"), Map.entry("Health", "#2e7d32"),
-            Map.entry("News", "#00695c"), Map.entry("Politics", "#c62828"),
-            Map.entry("Science", "#00838f"), Map.entry("Sports", "#ef6c00"),
-            Map.entry("Technology", "#283593"), Map.entry("Weblogs", "#5d4037"));
+            Map.entry("Entertainment", "#6a1b9a"), Map.entry("Food", "#ad1457"),
+            Map.entry("Health", "#2e7d32"), Map.entry("Internet", "#0277bd"),
+            Map.entry("Music", "#7b1fa2"), Map.entry("News", "#00695c"),
+            Map.entry("Podcast", "#4527a0"), Map.entry("Politics", "#c62828"),
+            Map.entry("Science", "#00838f"), Map.entry("Software", "#455a64"),
+            Map.entry("Sports", "#ef6c00"), Map.entry("Technology", "#283593"),
+            Map.entry("Weblogs", "#5d4037"));
 
     private record FeedSource(String title, String category, String url) {}
 
@@ -134,6 +141,11 @@ public class FeedService {
                         CATEGORY_COLOR.get(s.category()),
                         link));
             }
+        }
+        // Keep only the newest PER_FEED_MAX per feed, like RSSOwl's count-based cleanup.
+        out.sort(Comparator.comparing(NewsItem::date, Comparator.nullsLast(Comparator.reverseOrder())));
+        if (out.size() > PER_FEED_MAX) {
+            out = new ArrayList<>(out.subList(0, PER_FEED_MAX));
         }
         return out;
     }
