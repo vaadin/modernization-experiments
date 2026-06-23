@@ -1,0 +1,17 @@
+/* Owner-draw equivalents for the headline grid, driven by Grid.setPartNameGenerator(...).
+   RSSOwl painted these in an SWT.EraseItem listener; here they are plain CSS on grid cell parts. */
+
+/* Bold = unread (RSSOwl: bold font for NEW/UPDATED/UNREAD). */
+vaadin-grid::part(unread) {
+    font-weight: 600;
+}
+
+/* Sticky/flagged rows get RSSOwl's pale-yellow background (RGB 255,255,180).
+   NOTE (finding): the Vaadin MCP styling docs say to set row backgrounds via
+   --vaadin-grid-cell-background, but under the new Aura theme that custom property is ignored —
+   the cell's background-color is computed independently (to white). So we set background-color
+   directly on the part. A docs-vs-Aura mismatch that only surfaced by running it. */
+vaadin-grid::part(sticky) {
+    --vaadin-grid-cell-background: #fffdb4;     /* documented path — no effect under Aura */
+    background-color: #fffdb4 !important;       /* needs !important to beat Aura's internal cell bg */
+}

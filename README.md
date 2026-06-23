@@ -84,5 +84,26 @@ _(Filled in as the experiment progresses.)_
 
 ## Running it
 
-_TBD — once the POC exists, this section must let a developer clone, build, and run it
-from scratch._
+The migrated slice is a runnable Vaadin 25.1 app in [`poc/headlines/`](poc/headlines/).
+
+**Prerequisites:** a JDK **21+** (Vaadin 25 requires Java 21; Node.js is downloaded automatically
+on first build). No global Maven needed — the project ships the Maven wrapper.
+
+```sh
+git clone git@gitlab.vaadin.com:enver/swt-rcp-to-vaadin-modernization.git
+cd swt-rcp-to-vaadin-modernization/poc/headlines
+./mvnw spring-boot:run        # first run downloads the frontend toolchain; then ~4s startup
+```
+
+Open <http://localhost:8080>. You'll see the headline table (sortable columns, bold-unread,
+sticky-row highlight, label colours, state icons), an in-cell read/sticky toggle, a right-click
+context menu, and a reader pane that updates on selection via Vaadin Signals.
+
+The full story — what the AI/tooling did well, what it got wrong, and what's genuinely hard — is in
+[`docs/REPORT.md`](docs/REPORT.md). "Before" (the original SWT/RCP app) and "after" (this POC)
+screenshots are in [`docs/before/`](docs/before/) and [`docs/after/`](docs/after/).
+
+> Reproducing on **your own** SWT/RCP code: the method (and its traps) is documented in the report
+> — clone your app, build it from source to confirm it still runs, map the slice's JFace viewers to
+> Vaadin `Grid`/`TreeGrid`, and **query the Vaadin MCP server for current APIs** rather than relying
+> on an AI model's training data (see the report's "Working method" section for why).
