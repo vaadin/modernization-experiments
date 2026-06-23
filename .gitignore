@@ -1,0 +1,17 @@
+# Build output
+target/
+poc/**/target/
+
+# Vaadin / frontend toolchain (downloaded/generated)
+node_modules/
+poc/**/node_modules/
+poc/**/src/main/frontend/generated/
+poc/**/src/main/bundles/
+node/
+.vaadin/
+
+# Playwright MCP scratch output (snapshots/console logs from verification)
+.playwright-mcp/
+
+# OS / editor
+.DS_Store
