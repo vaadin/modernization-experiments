@@ -7,8 +7,10 @@
 > _Status: target chosen; original binary diagnosed as dead; runnable "before" obtained (incl. a
 > native-arm64 from-source build); the slice's RCP/JFace code mapped and the migration designed
 > (plan mode); and a **runnable Vaadin 25.1 POC built and verified** in the browser
-> (`poc/headlines/`, screenshots in `docs/after/`) — now showing **live RSS from RSSOwl's default
-> feeds** in a **`TreeGrid` with grouping**. Honest findings recorded below._
+> (`poc/headlines/`, screenshots in `docs/after/`). End of **day 1**: the POC now reproduces
+> RSSOwl's **three-pane layout** (feeds tree → headlines → reader) over **live RSS from RSSOwl's
+> default feeds** — 15 category folders + ungrouped channels + 5 saved-search smart folders, with
+> grouping, sorting, a context menu, and Signals-driven detail. Honest findings recorded below._
 
 ---
 
@@ -468,8 +470,10 @@ a category or feed filters the headlines; a second `TreeGrid` (the feeds tree) d
 
 | What | After (Vaadin 25.1, live data) |
 |---|---|
-| **Three-pane layout** — feeds tree (Business … Weblogs + ungrouped channels) ‖ headlines ‖ reader | ![three-pane](after/threepane-layout.png) |
+| **Three-pane layout** — full feeds tree (15 folders + channels + smart folders) ‖ headlines ‖ reader | ![three-pane](after/threepane-layout.png) |
+| In use — select a headline, reader fills via a Signal | ![reading](after/threepane-reading.png) |
 | Click a feed → headlines filter to it (BBC Business) | ![filtered](after/threepane-filtered.png) |
+| Saved-search smart folder selected (News with Attachments) | ![smart folders](after/threepane-smartfolders.png) |
 | Group by **Feed** — bold group headers with counts, items nested & date-sorted | ![grouped by feed](after/grouped-by-feed.png) |
 | Live headlines from the default feeds | ![live feeds](after/feeds-live.png) |
 
@@ -521,6 +525,25 @@ explained.
 The honest takeaway for "can AI do this migration?": yes mechanically, but it will quietly produce a
 *plausible-looking* approximation that's missing pieces only someone familiar with the original will
 spot. The migration tooling reproduces structure; faithful *completeness* still needs human review.
+
+### Where it landed (end of day 1)
+
+The last step closed the loop from "a flat list of headlines" to **the recognizable RSSOwl screen**:
+a three-pane layout whose left tree carries all 15 category folders, the loose top-level channels,
+and the five saved-search smart folders — over **live** headlines from RSSOwl's own default feeds,
+capped by RSSOwl's own 200/feed rule. Set the "before" (native SWT, `docs/before/`) beside the
+"after" (`docs/after/threepane-layout.png`, `threepane-reading.png`) and they read as the same
+application — one desktop, one in a browser tab, no install.
+
+What that took, honestly: the *structure* came quickly with AI + the Vaadin MCP, but **every gap
+between "looks right" and "is right" was closed by human review**, not by the model noticing — the
+stale Signals API, the dead-toolkit over-claim, the invented feed taxonomy, fewer channels, and the
+arbitrary item cap. That is the experiment's central finding, and the most useful thing to tell an
+architect weighing this migration: the tooling gets you a faithful skeleton fast; a person who knows
+the source app turns it into a faithful *app*. The behavioral long-pole items (multi-select range
+semantics, the auto-mark-read timer, column persistence, real user-labels, owner-draw selection
+paint) remain — sized in the design section, and the honest reason the full sub-slice is ~13–18 days,
+not an afternoon.
 
 ### What the AI got right, first try
 - The whole structure compiled after **two** real API fixes (below) and ran first launch.
