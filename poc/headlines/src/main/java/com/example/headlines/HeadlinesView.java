@@ -97,14 +97,18 @@ public class HeadlinesView extends Div {
         feedTree.setSizeFull();
         feedTree.addThemeVariants(GridVariant.LUMO_COMPACT, GridVariant.LUMO_NO_BORDER);
 
+        // Split into category folders and ungrouped top-level channels (category "Uncategorized"),
+        // mirroring RSSOwl's default_feeds.xml: folders + loose channels beside them.
         Map<String, List<NewsItem>> byCat = new TreeMap<>(); // alphabetical -> Business first
+        List<NewsItem> ungrouped = new ArrayList<>();
         for (NewsItem n : allItems) {
-            byCat.computeIfAbsent(n.category(), k -> new ArrayList<>()).add(n);
+            if ("Uncategorized".equals(n.category())) ungrouped.add(n);
+            else byCat.computeIfAbsent(n.category(), k -> new ArrayList<>()).add(n);
         }
-        List<FeedNode> categories = new ArrayList<>();
+        List<FeedNode> roots = new ArrayList<>();
         Map<String, List<FeedNode>> feedsByCategory = new HashMap<>();
         for (var e : byCat.entrySet()) {
-            categories.add(new FeedNode.Category(e.getKey(), e.getValue().size()));
+            roots.add(new FeedNode.Category(e.getKey(), e.getValue().size()));
             Map<String, Long> byFeed = e.getValue().stream()
                     .collect(Collectors.groupingBy(NewsItem::feed, TreeMap::new, Collectors.counting()));
             List<FeedNode> feeds = byFeed.entrySet().stream()
@@ -112,9 +116,13 @@ public class HeadlinesView extends Div {
                     .toList();
             feedsByCategory.put(e.getKey(), feeds);
         }
+        // ungrouped channels as top-level leaves (siblings of folders), alphabetical
+        ungrouped.stream()
+                .collect(Collectors.groupingBy(NewsItem::feed, TreeMap::new, Collectors.counting()))
+                .forEach((feed, count) -> roots.add(new FeedNode.Feed(feed, "Uncategorized", count.intValue())));
 
         feedTree.addHierarchyColumn(FeedNode::label).setHeader("Feeds");
-        feedTree.setItems(categories, node ->
+        feedTree.setItems(roots, node ->
                 node instanceof FeedNode.Category c ? feedsByCategory.getOrDefault(c.name(), List.of())
                         : List.of());
         feedTree.setPartNameGenerator(n -> n instanceof FeedNode.Category ? "feed-category" : null);

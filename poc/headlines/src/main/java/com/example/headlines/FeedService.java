@@ -44,10 +44,12 @@ public class FeedService {
     private static final Logger log = LoggerFactory.getLogger(FeedService.class);
     private static final int MAX_ITEMS = 800;
     private static final Duration PER_FEED_TIMEOUT = Duration.ofSeconds(8);
-    private static final Map<String, String> CATEGORY_COLOR = Map.of(
-            "Business", "#1565c0", "Entertainment", "#6a1b9a", "Health", "#2e7d32",
-            "Politics", "#c62828", "Science", "#00838f", "Sports", "#ef6c00",
-            "Technology", "#283593", "World", "#4e342e");
+    private static final Map<String, String> CATEGORY_COLOR = Map.ofEntries(
+            Map.entry("Business", "#1565c0"), Map.entry("Computers", "#37474f"),
+            Map.entry("Entertainment", "#6a1b9a"), Map.entry("Health", "#2e7d32"),
+            Map.entry("News", "#00695c"), Map.entry("Politics", "#c62828"),
+            Map.entry("Science", "#00838f"), Map.entry("Sports", "#ef6c00"),
+            Map.entry("Technology", "#283593"), Map.entry("Weblogs", "#5d4037"));
 
     private record FeedSource(String title, String category, String url) {}
 
