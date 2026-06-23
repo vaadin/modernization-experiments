@@ -485,6 +485,30 @@ author — real RSS is messy. One runtime bug surfaced only by running it: `Tree
 *"Cannot add the same item multiple times"* when feeds repeat a link — fixed by de-duping items by a
 stable 64-bit id before building the tree.
 
+### Fidelity gap: fewer channels than the original (caught in review)
+
+Comparing the running Vaadin tree against the RSSOwl "before" screenshot side by side, the human in
+the loop noted: *"there are fewer channels in the Vaadin version. Why?"* — a fair hit, and worth
+recording because it's the recurring shape of this experiment (the AI silently under-delivers
+fidelity; a human who knows the original has to keep checking). RSSOwl's tree has ~32 top-level rows;
+the PoC has ~14. Four distinct reasons, none of them "Vaadin can't":
+
+1. **Dropped 5 of 15 category folders** — Food, Internet, Music, Podcast, Software — because reliable
+   *current* free RSS for them is scarce (the 2009 URLs are dead). A sourcing problem, not a UI one.
+2. **Ungrouped channels under-represented** — RSSOwl lists BBC News, NYT, Guardian, TechCrunch, Wired
+   *both* inside folders *and* as loose top-level channels; the PoC originally only had them inside
+   folders. **(Fixed:)** these big outlets now also appear as top-level channels (a `FEATURED` set
+   surfaces them beside the genuinely-ungrouped feeds, no data duplication). Still absent: **CNN**
+   (SSL handshake fails), **Reuters** (killed public RSS), **RSSOwlnix News** (returned nothing).
+3. **No saved-search smart folders** — RSSOwl's Unread News / Today's News / News with Attachments /
+   Sticky News / Labeled News are *saved searches*, a feature not built here (5 rows absent).
+4. **Counts are real-time and capped** (`MAX_ITEMS=800`) vs RSSOwl's *accumulated unread over time*
+   (Technology 846, Computers 394) — three current feeds fetched once ≠ years of retained articles.
+
+The honest takeaway for "can AI do this migration?": yes mechanically, but it will quietly produce a
+*plausible-looking* approximation that's missing pieces only someone familiar with the original will
+spot. The migration tooling reproduces structure; faithful *completeness* still needs human review.
+
 ### What the AI got right, first try
 - The whole structure compiled after **two** real API fixes (below) and ran first launch.
 - **Signals master→detail just worked**: `grid.addSelectionListener` sets a `ValueSignal<NewsItem>`,
@@ -528,6 +552,13 @@ owner-draw fidelity, not the parts shown here.
 
 _(This section is the point of the experiment and grows as we go.)_
 
+- **The AI reproduces *structure* but quietly under-delivers *completeness*; human review is the
+  safety net.** Across this experiment a knowledgeable human repeatedly caught gaps the model didn't
+  surface on its own: the stale Signals API, the over-claim about the dead toolkit, an invented feed
+  taxonomy (a made-up "World" category, missing "Weblogs"), and **fewer channels than the original**
+  (10 of 15 folders, no ungrouped channels, no saved-search smart folders). Each was a plausible-
+  looking approximation. The migration is very doable *with* a reviewer who knows the source; without
+  one it would ship something that looks right and isn't.
 - **Running a *prebuilt* stranded SWT/RCP app on a current Mac is a project.** The official
   2.2.1 binary is unrunnable (32-bit Carbon); even the maintained fork's release needs an
   x86_64 JVM, an exec-bit fix, an ad-hoc re-sign, and Rosetta — which Apple is phasing out.

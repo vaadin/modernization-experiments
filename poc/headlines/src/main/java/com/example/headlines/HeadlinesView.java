@@ -50,6 +50,11 @@ public class HeadlinesView extends Div {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
+    /** Big outlets shown as loose top-level channels too (they also live in folders), like RSSOwl.
+     *  Names must match the feed titles in feeds.opml. */
+    private static final java.util.Set<String> FEATURED = java.util.Set.of(
+            "BBC News", "NYT — Home", "Guardian World", "TechCrunch", "Wired");
+
     private final List<NewsItem> allItems;
     private List<NewsItem> currentItems;
     private GroupBy currentGroupBy = GroupBy.NONE;
@@ -116,10 +121,14 @@ public class HeadlinesView extends Div {
                     .toList();
             feedsByCategory.put(e.getKey(), feeds);
         }
-        // ungrouped channels as top-level leaves (siblings of folders), alphabetical
-        ungrouped.stream()
-                .collect(Collectors.groupingBy(NewsItem::feed, TreeMap::new, Collectors.counting()))
-                .forEach((feed, count) -> roots.add(new FeedNode.Feed(feed, "Uncategorized", count.intValue())));
+        // Top-level channels = genuinely ungrouped feeds + a few "featured" big outlets that ALSO
+        // live in folders (RSSOwl lists e.g. BBC News both inside a folder and as a loose channel).
+        Map<String, Long> topLevel = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        ungrouped.forEach(n -> topLevel.merge(n.feed(), 1L, Long::sum));
+        allItems.stream().filter(n -> FEATURED.contains(n.feed()))
+                .forEach(n -> topLevel.merge(n.feed(), 1L, Long::sum));
+        topLevel.forEach((feed, count) ->
+                roots.add(new FeedNode.Feed(feed, "Uncategorized", count.intValue())));
 
         feedTree.addHierarchyColumn(FeedNode::label).setHeader("Feeds");
         feedTree.setItems(roots, node ->
