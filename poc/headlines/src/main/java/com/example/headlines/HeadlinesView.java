@@ -55,6 +55,12 @@ public class HeadlinesView extends Div {
     private static final java.util.Set<String> FEATURED = java.util.Set.of(
             "BBC News", "NYT — Home", "Guardian World", "TechCrunch", "Wired");
 
+    /** RSSOwl's default saved-search smart folders: {display name, predicate key}. */
+    private static final String[][] SAVED = {
+            {"Unread News", "unread"}, {"Today's News", "today"},
+            {"News with Attachments", "attachments"}, {"Sticky News", "sticky"},
+            {"Labeled News", "labeled"}};
+
     private final List<NewsItem> allItems;
     private List<NewsItem> currentItems;
     private GroupBy currentGroupBy = GroupBy.NONE;
@@ -130,11 +136,18 @@ public class HeadlinesView extends Div {
         topLevel.forEach((feed, count) ->
                 roots.add(new FeedNode.Feed(feed, "Uncategorized", count.intValue())));
 
+        // Saved-search smart folders at the bottom (RSSOwl: Unread/Today/Attachments/Sticky/Labeled).
+        for (String[] s : SAVED) {
+            int c = (int) allItems.stream().filter(savedPredicate(s[1])).count();
+            roots.add(new FeedNode.Saved(s[0], s[1], c));
+        }
+
         feedTree.addHierarchyColumn(FeedNode::label).setHeader("Feeds");
         feedTree.setItems(roots, node ->
                 node instanceof FeedNode.Category c ? feedsByCategory.getOrDefault(c.name(), List.of())
                         : List.of());
-        feedTree.setPartNameGenerator(n -> n instanceof FeedNode.Category ? "feed-category" : null);
+        feedTree.setPartNameGenerator(n -> n instanceof FeedNode.Category ? "feed-category"
+                : n instanceof FeedNode.Saved ? "feed-saved" : null);
 
         feedTree.addSelectionListener(e -> {
             FeedNode sel = e.getFirstSelectedItem().orElse(null);
@@ -142,6 +155,8 @@ public class HeadlinesView extends Div {
                 currentItems = allItems.stream().filter(n -> c.name().equals(n.category())).toList();
             } else if (sel instanceof FeedNode.Feed f) {
                 currentItems = allItems.stream().filter(n -> f.name().equals(n.feed())).toList();
+            } else if (sel instanceof FeedNode.Saved sv) {
+                currentItems = allItems.stream().filter(savedPredicate(sv.key())).toList();
             } else {
                 currentItems = allItems;
             }
@@ -370,6 +385,19 @@ public class HeadlinesView extends Div {
 
     private Optional<NewsItem> itemOf(Optional<Row> row) {
         return row.filter(r -> r instanceof Row.ItemRow).map(r -> ((Row.ItemRow) r).news());
+    }
+
+    /** Predicate behind a saved-search smart folder. "labeled" is a stub (the PoC has no user-label
+     *  feature — the colours are per-category, not user labels), so it stays empty, honestly. */
+    private java.util.function.Predicate<NewsItem> savedPredicate(String key) {
+        return switch (key) {
+            case "unread" -> NewsItem::unread;
+            case "today" -> n -> n.date() != null
+                    && n.date().toLocalDate().equals(java.time.LocalDate.now());
+            case "attachments" -> NewsItem::attachments;
+            case "sticky" -> NewsItem::sticky;
+            default -> n -> false; // "labeled" — no user labels in the PoC
+        };
     }
 
     private Comparator<Row> rowCmp(Comparator<NewsItem> itemCmp) {

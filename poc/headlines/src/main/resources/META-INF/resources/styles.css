@@ -26,3 +26,8 @@ vaadin-grid::part(group) {
 vaadin-grid::part(feed-category) {
     font-weight: 600;
 }
+
+/* Saved-search smart folders (Unread/Today/...) in italic to set them apart. */
+vaadin-grid::part(feed-saved) {
+    font-style: italic;
+}

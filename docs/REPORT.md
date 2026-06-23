@@ -500,8 +500,11 @@ vs RSSOwl's ~32. Four reasons, none "Vaadin can't" — and three are now closed 
    Wired *both* inside folders *and* as loose channels; a `FEATURED` set now surfaces them as
    top-level channels too (no data duplication). Still absent: **CNN** (SSL handshake fails) and
    **Reuters** (killed public RSS).
-3. **No saved-search smart folders** — RSSOwl's Unread News / Today's News / News with Attachments /
-   Sticky News / Labeled News are *saved searches*, a feature not built here (5 rows still absent).
+3. **~~No saved-search smart folders~~ (Fixed.)** RSSOwl's Unread News / Today's News / News with
+   Attachments / Sticky News / Labeled News are *saved searches*; the tree now shows all five at the
+   bottom as computed `FeedNode.Saved` filters over all items (Attachments uses RSS enclosures —
+   so podcasts/media match). **"Labeled News" is an honest stub** (count 0): the PoC has no
+   user-label feature — the title colours are per-category, not user labels.
 4. **~~Counts arbitrary~~ (Fixed — copied RSSOwl's actual limit.)** Asked "is there a MAX_ITEMS in the
    old software?", we found RSSOwl's `PreferencesInitializer`: count-based cleanup is **on by default**
    at **200 news per feed** (`DEL_NEWS_BY_COUNT_VALUE = 200`). The PoC now applies that exact
@@ -509,8 +512,11 @@ vs RSSOwl's ~32. Four reasons, none "Vaadin can't" — and three are now closed 
    RSSOwl-scaled (Business 142, Podcast 213, Sports 175, Weblogs 167, …). Still differs from RSSOwl's
    *accumulated unread over time* — one live fetch ≠ years of retained articles.
 
-So the tree now closely matches RSSOwl: 15 folders + ~10 ungrouped channels, governed by RSSOwl's own
-200/feed limit; only the 5 saved-search smart folders (and the two dead endpoints) remain.
+So the tree now matches RSSOwl structurally: **15 category folders + ~10 ungrouped channels + 5
+saved-search smart folders**, governed by RSSOwl's own 200/feed limit. What's left is genuinely
+unavailable, not unbuilt: two dead endpoints (CNN's SSL, Reuters' removed RSS) and the "Labeled
+News" stub (no user-label feature in the PoC). All four review-caught reasons are now closed or
+explained.
 
 The honest takeaway for "can AI do this migration?": yes mechanically, but it will quietly produce a
 *plausible-looking* approximation that's missing pieces only someone familiar with the original will

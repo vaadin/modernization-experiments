@@ -129,6 +129,7 @@ public class FeedService {
                 if (link == null || link.isBlank()) continue;
                 long id = hash64(s.title() + " " + link);
                 String author = blankTo(e.getAuthor(), "Unknown");
+                boolean hasAttachment = e.getEnclosures() != null && !e.getEnclosures().isEmpty();
                 out.add(new NewsItem(
                         id,
                         blankTo(e.getTitle(), "(untitled)").strip(),
@@ -139,7 +140,8 @@ public class FeedService {
                         State.UNREAD,
                         false,
                         CATEGORY_COLOR.get(s.category()),
-                        link));
+                        link,
+                        hasAttachment));
             }
         }
         // Keep only the newest PER_FEED_MAX per feed, like RSSOwl's count-based cleanup.

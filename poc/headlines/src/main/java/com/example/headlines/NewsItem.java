@@ -26,16 +26,18 @@ public class NewsItem {
     private boolean sticky;
     private final String labelColor; // CSS hex like "#1565c0", or null for none
     private final String link;
+    private final boolean attachments; // RSS enclosure present -> "News with Attachments"
 
-    /** Fixture constructor (feed defaults to the category). */
+    /** Fixture constructor (feed defaults to the category, no attachments). */
     public NewsItem(long id, String title, String author, String category, LocalDateTime date,
             State state, boolean sticky, String labelColor, String link) {
-        this(id, title, author, category, category, date, state, sticky, labelColor, link);
+        this(id, title, author, category, category, date, state, sticky, labelColor, link, false);
     }
 
     /** Full constructor used by the live feed mapping. */
     public NewsItem(long id, String title, String author, String category, String feed,
-            LocalDateTime date, State state, boolean sticky, String labelColor, String link) {
+            LocalDateTime date, State state, boolean sticky, String labelColor, String link,
+            boolean attachments) {
         this.id = id;
         this.title = title;
         this.author = author;
@@ -46,6 +48,7 @@ public class NewsItem {
         this.sticky = sticky;
         this.labelColor = labelColor;
         this.link = link;
+        this.attachments = attachments;
     }
 
     public long id() { return id; }
@@ -58,6 +61,7 @@ public class NewsItem {
     public boolean sticky() { return sticky; }
     public String labelColor() { return labelColor; }
     public String link() { return link; }
+    public boolean attachments() { return attachments; }
 
     /** Bold in RSSOwl when NEW, UPDATED or UNREAD (see {@code NewsTableLabelProvider.getFont}). */
     public boolean unread() {
