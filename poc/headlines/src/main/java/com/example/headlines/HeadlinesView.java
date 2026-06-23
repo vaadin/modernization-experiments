@@ -1,9 +1,12 @@
 package com.example.headlines;
 
+import com.example.headlines.Grouping.Bucket;
+import com.example.headlines.Grouping.GroupBy;
+import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
-import com.vaadin.flow.component.grid.Grid;
+import com.vaadin.flow.component.grid.GridSortOrder;
 import com.vaadin.flow.component.grid.GridVariant;
 import com.vaadin.flow.component.grid.contextmenu.GridContextMenu;
 import com.vaadin.flow.component.grid.contextmenu.GridMenuItem;
@@ -14,7 +17,12 @@ import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.Icon;
 import com.vaadin.flow.component.icon.VaadinIcon;
+import com.vaadin.flow.component.orderedlayout.FlexComponent;
+import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
+import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.component.select.Select;
 import com.vaadin.flow.component.splitlayout.SplitLayout;
+import com.vaadin.flow.component.treegrid.TreeGrid;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.signals.Signal;
@@ -23,16 +31,18 @@ import com.vaadin.flow.signals.local.ValueSignal;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 /**
- * POC: RSSOwl's headline table ({@code NewsTableControl}/{@code NewsTableLabelProvider}/
- * {@code NewsComparator}) migrated to a Vaadin 25.1 {@link Grid}, with the article reader wired
- * via a {@link ValueSignal} (Vaadin Signals), inside a {@link SplitLayout}.
- *
- * <p>Scope note (honest): the production design targets {@code TreeGrid} so rows can be grouped;
- * this POC uses a flat {@code Grid} — which is exactly the headline question ("can the SWT table
- * move to a Vaadin Grid"). Grouping/TreeGrid is documented in the report as the next step.
+ * POC matching RSSOwl(nix)'s three-pane structure: left = a feeds-navigation tree
+ * (Category → Feed, with counts), top-right = the headlines {@link TreeGrid} (sortable, groupable),
+ * bottom-right = the article reader. Live headlines come from RSSOwl's default feeds
+ * ({@link FeedService}); selection→reader is wired with Vaadin Signals.
  */
 @Route("")
 @PageTitle("Headlines — SWT→Vaadin POC")
@@ -40,140 +50,253 @@ public class HeadlinesView extends Div {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
-    private final List<NewsItem> items = new ArrayList<>(DemoData.sample());
-    private final Grid<NewsItem> grid = new Grid<>();
+    private final List<NewsItem> allItems;
+    private List<NewsItem> currentItems;
+    private GroupBy currentGroupBy = GroupBy.NONE;
 
-    /** Single source of truth for the selected headline — the detail pane reacts to this. */
+    private final TreeGrid<FeedNode> feedTree = new TreeGrid<>();
+    private final TreeGrid<Row> headlines = new TreeGrid<>();
     private final ValueSignal<NewsItem> selected = new ValueSignal<NewsItem>((NewsItem) null);
+    private final Map<Row.GroupRow, List<Row>> children = new HashMap<>();
+    private com.vaadin.flow.component.grid.Grid.Column<Row> dateColumn;
 
-    public HeadlinesView() {
+    public HeadlinesView(FeedService feedService) {
         setSizeFull();
-        addClassName("headlines-view");
+        this.allItems = feedService.items();
+        this.currentItems = allItems;
 
-        configureGrid();
+        configureFeedTree();
+        configureHeadlines();
+        applyGrouping(GroupBy.NONE);
 
-        Div detail = buildReactiveDetail();
+        Div reader = buildReactiveReader();
 
-        SplitLayout split = new SplitLayout(grid, detail);
-        split.setSizeFull();
-        split.setSplitterPosition(62);
-        add(split);
+        // top-right (headlines + a small toolbar) over bottom-right (reader)
+        VerticalLayout headlinesPane = new VerticalLayout(buildToolbar(feedService), headlines);
+        headlinesPane.setSizeFull();
+        headlinesPane.setPadding(false);
+        headlinesPane.setSpacing(false);
+        headlinesPane.setFlexGrow(1, headlines);
+
+        SplitLayout right = new SplitLayout(headlinesPane, reader);
+        right.setOrientation(SplitLayout.Orientation.VERTICAL);
+        right.setSplitterPosition(60);
+        right.setSizeFull();
+
+        // left feeds tree | right (headlines / reader)
+        SplitLayout outer = new SplitLayout(feedTree, right);
+        outer.setOrientation(SplitLayout.Orientation.HORIZONTAL);
+        outer.setSplitterPosition(20);
+        outer.setSizeFull();
+        add(outer);
     }
 
-    private void configureGrid() {
-        grid.setSizeFull();
-        grid.addThemeVariants(GridVariant.LUMO_ROW_STRIPES, GridVariant.LUMO_NO_BORDER);
-        grid.setSelectionMode(Grid.SelectionMode.SINGLE);
-        grid.setItems(items);
+    // --- left pane: feeds navigation tree (RSSOwl's BookMarkExplorer) ---
 
-        // Status icon (new/updated/unread/read) — RSSOwl's TITLE-column state icon.
-        grid.addComponentColumn(this::stateIcon)
+    private void configureFeedTree() {
+        feedTree.setSizeFull();
+        feedTree.addThemeVariants(GridVariant.LUMO_COMPACT, GridVariant.LUMO_NO_BORDER);
+
+        Map<String, List<NewsItem>> byCat = new TreeMap<>(); // alphabetical -> Business first
+        for (NewsItem n : allItems) {
+            byCat.computeIfAbsent(n.category(), k -> new ArrayList<>()).add(n);
+        }
+        List<FeedNode> categories = new ArrayList<>();
+        Map<String, List<FeedNode>> feedsByCategory = new HashMap<>();
+        for (var e : byCat.entrySet()) {
+            categories.add(new FeedNode.Category(e.getKey(), e.getValue().size()));
+            Map<String, Long> byFeed = e.getValue().stream()
+                    .collect(Collectors.groupingBy(NewsItem::feed, TreeMap::new, Collectors.counting()));
+            List<FeedNode> feeds = byFeed.entrySet().stream()
+                    .<FeedNode>map(fe -> new FeedNode.Feed(fe.getKey(), e.getKey(), fe.getValue().intValue()))
+                    .toList();
+            feedsByCategory.put(e.getKey(), feeds);
+        }
+
+        feedTree.addHierarchyColumn(FeedNode::label).setHeader("Feeds");
+        feedTree.setItems(categories, node ->
+                node instanceof FeedNode.Category c ? feedsByCategory.getOrDefault(c.name(), List.of())
+                        : List.of());
+        feedTree.setPartNameGenerator(n -> n instanceof FeedNode.Category ? "feed-category" : null);
+
+        feedTree.addSelectionListener(e -> {
+            FeedNode sel = e.getFirstSelectedItem().orElse(null);
+            if (sel instanceof FeedNode.Category c) {
+                currentItems = allItems.stream().filter(n -> c.name().equals(n.category())).toList();
+            } else if (sel instanceof FeedNode.Feed f) {
+                currentItems = allItems.stream().filter(n -> f.name().equals(n.feed())).toList();
+            } else {
+                currentItems = allItems;
+            }
+            applyGrouping(currentGroupBy);
+        });
+    }
+
+    private Component buildToolbar(FeedService feedService) {
+        Select<GroupBy> groupBy = new Select<>();
+        groupBy.setLabel("Group by");
+        groupBy.setItems(GroupBy.values());
+        groupBy.setItemLabelGenerator(GroupBy::label);
+        groupBy.setValue(GroupBy.NONE);
+        groupBy.addValueChangeListener(e -> {
+            currentGroupBy = e.getValue();
+            applyGrouping(currentGroupBy);
+        });
+
+        HorizontalLayout bar = new HorizontalLayout(groupBy);
+        bar.setAlignItems(FlexComponent.Alignment.END);
+        bar.getStyle().set("padding", "0.4rem 1rem");
+        if (feedService.isFallback()) {
+            Span banner = new Span("⚠ Live feeds unreachable — showing bundled demo data.");
+            banner.getStyle().set("color", "#b00").set("align-self", "center");
+            bar.add(banner);
+        }
+        return bar;
+    }
+
+    // --- top-right pane: headlines ---
+
+    private void configureHeadlines() {
+        headlines.setSizeFull();
+        headlines.addThemeVariants(GridVariant.LUMO_ROW_STRIPES, GridVariant.LUMO_NO_BORDER);
+        headlines.setSelectionMode(TreeGrid.SelectionMode.SINGLE);
+
+        headlines.addComponentColumn(row -> itemOnly(row, this::stateIcon))
                 .setHeader("").setKey("status").setWidth("46px").setFlexGrow(0)
-                .setComparator(Comparator.comparingInt(NewsItem::statusRank)).setSortable(true);
+                .setComparator(rowCmp(Comparator.comparingInt(NewsItem::statusRank))).setSortable(true);
 
-        // Title — label colour applied as text colour (RSSOwl's label foreground); bold-unread
-        // is handled by the row part-name generator + CSS, not here.
-        grid.addComponentColumn(this::titleCell)
+        headlines.addComponentHierarchyColumn(this::titleComponent)
                 .setHeader("Title").setKey("title").setFlexGrow(3)
-                .setComparator(Comparator.comparing(NewsItem::title, String.CASE_INSENSITIVE_ORDER))
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::title, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
-        grid.addColumn(NewsItem::author).setHeader("Author").setKey("author").setFlexGrow(1)
-                .setComparator(Comparator.comparing(NewsItem::author, String.CASE_INSENSITIVE_ORDER))
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().author() : "")
+                .setHeader("Author").setKey("author").setFlexGrow(1)
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::author, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
-        grid.addColumn(NewsItem::category).setHeader("Category").setKey("category").setFlexGrow(1)
-                .setComparator(Comparator.comparing(NewsItem::category, String.CASE_INSENSITIVE_ORDER))
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().feed() : "")
+                .setHeader("Feed").setKey("feed").setFlexGrow(1)
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::feed, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
-        grid.addColumn(it -> it.date() == null ? "" : DATE_FMT.format(it.date()))
+        dateColumn = headlines.addColumn(row -> {
+                    if (row instanceof Row.ItemRow ir && ir.news().date() != null) {
+                        return DATE_FMT.format(ir.news().date());
+                    }
+                    return "";
+                })
                 .setHeader("Date").setKey("date").setWidth("160px").setFlexGrow(0)
-                // null dates sort last, mirroring RSSOwl's NewsComparator.
-                .setComparator(Comparator.comparing(NewsItem::date,
-                        Comparator.nullsLast(Comparator.naturalOrder())))
-                .setSortable(true);
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::date,
+                        Comparator.nullsLast(Comparator.naturalOrder())))).setSortable(true);
 
-        // In-cell interactive icons (replacing RSSOwl's pixel hit-testing in onMouseDown).
-        grid.addComponentColumn(this::readToggle)
+        headlines.addComponentColumn(row -> row instanceof Row.ItemRow ir ? readToggle(ir) : new Span())
                 .setHeader("").setKey("read").setWidth("46px").setFlexGrow(0);
-        grid.addComponentColumn(this::stickyToggle)
+        headlines.addComponentColumn(row -> row instanceof Row.ItemRow ir ? stickyToggle(ir) : new Span())
                 .setHeader("").setKey("sticky").setWidth("46px").setFlexGrow(0);
 
-        // Owner-draw equivalents: bold unread + sticky row background, via part names + CSS.
-        grid.setPartNameGenerator(it -> {
+        headlines.setPartNameGenerator(row -> {
+            if (row instanceof Row.GroupRow) return "group";
+            Row.ItemRow ir = (Row.ItemRow) row;
             StringBuilder sb = new StringBuilder();
-            if (it.unread()) sb.append("unread");
-            if (it.sticky()) sb.append(sb.isEmpty() ? "" : " ").append("sticky");
+            if (ir.news().unread()) sb.append("unread");
+            if (ir.news().sticky()) sb.append(sb.isEmpty() ? "" : " ").append("sticky");
             return sb.isEmpty() ? null : sb.toString();
         });
 
-        // Default sort: newest first (RSSOwl's default fallback is by date, descending).
-        grid.sort(com.vaadin.flow.component.grid.GridSortOrder
-                .desc(grid.getColumnByKey("date")).build());
-
-        // Selection -> detail: publish the selection into the signal (no listener plumbing on
-        // the detail side; it reacts in buildReactiveDetail()).
-        grid.addSelectionListener(e -> selected.set(e.getFirstSelectedItem().orElse(null)));
-
-        // Double-click opens the original article (RSSOwl: OpenInBrowserAction).
-        // Note: the item-click event exposes getItem() as a plain T (the context-menu event uses
-        // Optional<T>) — a small Grid API inconsistency worth recording.
-        grid.addItemDoubleClickListener(e -> openLink(e.getItem()));
+        headlines.addSelectionListener(e -> e.getFirstSelectedItem().ifPresent(row -> {
+            if (row instanceof Row.ItemRow ir) selected.set(ir.news());
+        }));
+        headlines.addItemDoubleClickListener(e -> {
+            if (e.getItem() instanceof Row.ItemRow ir) openLink(ir.news());
+        });
 
         buildContextMenu();
     }
 
-    private Div buildReactiveDetail() {
-        Div detail = new Div();
-        detail.setSizeFull();
-        detail.getStyle().set("padding", "1rem").set("overflow", "auto");
+    private void applyGrouping(GroupBy by) {
+        children.clear();
+        List<Row> roots = new ArrayList<>();
+        if (by == GroupBy.NONE) {
+            for (NewsItem n : currentItems) roots.add(new Row.ItemRow(n));
+            headlines.setItems(roots, r -> List.of());
+        } else {
+            for (Bucket b : Grouping.group(currentItems, by)) {
+                Row.GroupRow g = new Row.GroupRow(b.key(), b.label(), b.colorHint(),
+                        b.orderIndex(), b.items().size());
+                List<Row> kids = new ArrayList<>();
+                for (NewsItem n : b.items()) kids.add(new Row.ItemRow(n));
+                children.put(g, kids);
+                roots.add(g);
+            }
+            headlines.setItems(roots, r -> r instanceof Row.GroupRow g
+                    ? children.getOrDefault(g, List.of()) : List.of());
+            headlines.expandRecursively(roots, 1);
+        }
+        if (dateColumn != null) {
+            headlines.sort(GridSortOrder.desc(dateColumn).build());
+        }
+    }
 
-        // The effect re-runs whenever `selected` changes — this is the Signals replacement for
-        // RSSOwl's workbench selection-service wiring into NewsBrowserControl.
-        Signal.effect(detail, () -> {
+    // --- bottom-right pane: reader ---
+
+    private Div buildReactiveReader() {
+        Div reader = new Div();
+        reader.setSizeFull();
+        reader.getStyle().set("padding", "1rem").set("overflow", "auto");
+        Signal.effect(reader, () -> {
             NewsItem it = selected.get();
-            detail.removeAll();
+            reader.removeAll();
             if (it == null) {
                 Span hint = new Span("Select a headline to read it.");
                 hint.getStyle().set("color", "var(--vaadin-text-color-secondary, gray)");
-                detail.add(hint);
+                reader.add(hint);
                 return;
             }
             H3 title = new H3(it.title());
-            if (it.labelColor() != null) {
-                title.getStyle().set("color", it.labelColor());
-            }
+            if (it.labelColor() != null) title.getStyle().set("color", it.labelColor());
             Paragraph meta = new Paragraph(
                     (it.date() == null ? "—" : DATE_FMT.format(it.date()))
-                            + "  ·  " + it.author() + "  ·  " + it.category()
-                            + "  ·  " + it.state());
+                            + "  ·  " + it.feed() + "  ·  " + it.author() + "  ·  " + it.state());
             meta.getStyle().set("color", "var(--vaadin-text-color-secondary, gray)");
             Anchor link = new Anchor(it.link(), "Open original ↗");
             link.setTarget("_blank");
-            detail.add(title, meta, link);
+            reader.add(title, meta, link);
         });
-        return detail;
+        return reader;
     }
 
     private void buildContextMenu() {
-        GridContextMenu<NewsItem> menu = grid.addContextMenu();
-        menu.addItem("Open original", e -> e.getItem().ifPresent(this::openLink));
+        GridContextMenu<Row> menu = headlines.addContextMenu();
+        menu.addItem("Open original", e -> itemOf(e.getItem()).ifPresent(this::openLink));
         menu.addSeparator();
-        GridMenuItem<NewsItem> read = menu.addItem("Mark read", e ->
-                e.getItem().ifPresent(this::toggleReadAndRefresh));
-        GridMenuItem<NewsItem> sticky = menu.addItem("Make sticky", e ->
-                e.getItem().ifPresent(this::toggleStickyAndRefresh));
-
-        // Rebuild per open — the RSSOwl MenuManager.setRemoveAllWhenShown + menuAboutToShow shape.
-        menu.setDynamicContentHandler(item -> {
-            if (item == null) return false; // suppress on empty area / header
-            read.setText(item.unread() ? "Mark read" : "Mark unread");
-            sticky.setText(item.sticky() ? "Remove sticky" : "Make sticky");
+        GridMenuItem<Row> read = menu.addItem("Mark read", e -> e.getItem().ifPresent(this::toggleReadAndRefresh));
+        GridMenuItem<Row> sticky = menu.addItem("Make sticky", e -> e.getItem().ifPresent(this::toggleStickyAndRefresh));
+        menu.setDynamicContentHandler(row -> {
+            if (!(row instanceof Row.ItemRow ir)) return false; // no menu on group rows
+            read.setText(ir.news().unread() ? "Mark read" : "Mark unread");
+            sticky.setText(ir.news().sticky() ? "Remove sticky" : "Make sticky");
             return true;
         });
     }
 
     // --- cell components ---
+
+    private Component titleComponent(Row row) {
+        if (row instanceof Row.GroupRow g) {
+            Span s = new Span(g.label() + "  (" + g.count() + ")");
+            s.getStyle().set("font-weight", "600");
+            return s;
+        }
+        NewsItem n = ((Row.ItemRow) row).news();
+        Span s = new Span(n.title());
+        if (n.labelColor() != null) s.getStyle().set("color", n.labelColor());
+        return s;
+    }
+
+    private Component itemOnly(Row row, java.util.function.Function<NewsItem, Component> fn) {
+        return row instanceof Row.ItemRow ir ? fn.apply(ir.news()) : new Span();
+    }
 
     private Icon stateIcon(NewsItem it) {
         Icon icon = new Icon(it.unread() ? VaadinIcon.CIRCLE : VaadinIcon.CIRCLE_THIN);
@@ -188,46 +311,59 @@ public class HeadlinesView extends Div {
         return icon;
     }
 
-    private Span titleCell(NewsItem it) {
-        Span s = new Span(it.title());
-        if (it.labelColor() != null) {
-            s.getStyle().set("color", it.labelColor());
-        }
-        return s;
-    }
-
-    private Button readToggle(NewsItem it) {
+    private Button readToggle(Row.ItemRow ir) {
+        NewsItem it = ir.news();
         Button b = new Button(new Icon(it.unread() ? VaadinIcon.ENVELOPE : VaadinIcon.ENVELOPE_OPEN));
         b.addThemeVariants(ButtonVariant.LUMO_TERTIARY_INLINE, ButtonVariant.LUMO_SMALL);
         b.getElement().setAttribute("title", it.unread() ? "Mark read" : "Mark unread");
-        b.addClickListener(e -> toggleReadAndRefresh(it));
+        b.addClickListener(e -> toggleReadAndRefresh(ir));
         return b;
     }
 
-    private Button stickyToggle(NewsItem it) {
+    private Button stickyToggle(Row.ItemRow ir) {
+        NewsItem it = ir.news();
         Button b = new Button(new Icon(VaadinIcon.PIN));
         b.addThemeVariants(ButtonVariant.LUMO_TERTIARY_INLINE, ButtonVariant.LUMO_SMALL);
-        b.getElement().getStyle().set("color", it.sticky() ? "#c9a200" : "var(--vaadin-text-color-secondary, #bbb)");
+        b.getElement().getStyle().set("color",
+                it.sticky() ? "#c9a200" : "var(--vaadin-text-color-secondary, #bbb)");
         b.getElement().setAttribute("title", it.sticky() ? "Remove sticky" : "Make sticky");
-        b.addClickListener(e -> toggleStickyAndRefresh(it));
+        b.addClickListener(e -> toggleStickyAndRefresh(ir));
         return b;
     }
 
     // --- actions ---
 
-    private void toggleReadAndRefresh(NewsItem it) {
-        it.toggleRead();
-        grid.getDataProvider().refreshItem(it);
+    private void toggleReadAndRefresh(Row row) {
+        if (row instanceof Row.ItemRow ir) {
+            ir.news().toggleRead();
+            headlines.getDataProvider().refreshItem(ir);
+        }
     }
 
-    private void toggleStickyAndRefresh(NewsItem it) {
-        it.toggleSticky();
-        grid.getDataProvider().refreshItem(it);
+    private void toggleStickyAndRefresh(Row row) {
+        if (row instanceof Row.ItemRow ir) {
+            ir.news().toggleSticky();
+            headlines.getDataProvider().refreshItem(ir);
+        }
     }
 
     private void openLink(NewsItem it) {
-        if (it != null) {
-            UI.getCurrent().getPage().open(it.link(), "_blank");
-        }
+        if (it != null) UI.getCurrent().getPage().open(it.link(), "_blank");
+    }
+
+    private Optional<NewsItem> itemOf(Optional<Row> row) {
+        return row.filter(r -> r instanceof Row.ItemRow).map(r -> ((Row.ItemRow) r).news());
+    }
+
+    private Comparator<Row> rowCmp(Comparator<NewsItem> itemCmp) {
+        return (a, b) -> {
+            if (a instanceof Row.GroupRow ga && b instanceof Row.GroupRow gb) {
+                return Integer.compare(ga.orderIndex(), gb.orderIndex());
+            }
+            if (a instanceof Row.ItemRow ia && b instanceof Row.ItemRow ib) {
+                return itemCmp.compare(ia.news(), ib.news());
+            }
+            return 0;
+        };
     }
 }

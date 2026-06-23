@@ -19,19 +19,28 @@ public class NewsItem {
     private final long id;
     private final String title;
     private final String author;
-    private final String category;
+    private final String category; // RSSOwl: feed's folder (e.g. "News"); drives Group-by-Category
+    private final String feed;     // source feed title (e.g. "BBC News"); drives Group-by-Feed
     private final LocalDateTime date; // may be null -> sorts last, like RSSOwl
     private State state;
     private boolean sticky;
     private final String labelColor; // CSS hex like "#1565c0", or null for none
     private final String link;
 
+    /** Fixture constructor (feed defaults to the category). */
     public NewsItem(long id, String title, String author, String category, LocalDateTime date,
             State state, boolean sticky, String labelColor, String link) {
+        this(id, title, author, category, category, date, state, sticky, labelColor, link);
+    }
+
+    /** Full constructor used by the live feed mapping. */
+    public NewsItem(long id, String title, String author, String category, String feed,
+            LocalDateTime date, State state, boolean sticky, String labelColor, String link) {
         this.id = id;
         this.title = title;
         this.author = author;
         this.category = category;
+        this.feed = feed;
         this.date = date;
         this.state = state;
         this.sticky = sticky;
@@ -43,6 +52,7 @@ public class NewsItem {
     public String title() { return title; }
     public String author() { return author; }
     public String category() { return category; }
+    public String feed() { return feed; }
     public LocalDateTime date() { return date; }
     public State state() { return state; }
     public boolean sticky() { return sticky; }

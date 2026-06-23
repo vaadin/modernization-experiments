@@ -15,3 +15,14 @@ vaadin-grid::part(sticky) {
     --vaadin-grid-cell-background: #fffdb4;     /* documented path — no effect under Aura */
     background-color: #fffdb4 !important;       /* needs !important to beat Aura's internal cell bg */
 }
+
+/* Group header rows (RSSOwl's EntityGroup rows: bold, tinted background). */
+vaadin-grid::part(group) {
+    font-weight: 600;
+    background-color: #eef2f7 !important;
+}
+
+/* Left feeds-tree: category (folder) rows in bold, like RSSOwl's BookMarkExplorer. */
+vaadin-grid::part(feed-category) {
+    font-weight: 600;
+}

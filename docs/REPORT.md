@@ -7,7 +7,8 @@
 > _Status: target chosen; original binary diagnosed as dead; runnable "before" obtained (incl. a
 > native-arm64 from-source build); the slice's RCP/JFace code mapped and the migration designed
 > (plan mode); and a **runnable Vaadin 25.1 POC built and verified** in the browser
-> (`poc/headlines/`, screenshots in `docs/after/`). Honest findings recorded below._
+> (`poc/headlines/`, screenshots in `docs/after/`) — now showing **live RSS from RSSOwl's default
+> feeds** in a **`TreeGrid` with grouping**. Honest findings recorded below._
 
 ---
 
@@ -422,7 +423,9 @@ extension-point menu contributions late.
 The POC lives in [`../poc/headlines/`](../poc/headlines/): a Vaadin **25.1.8** Flow app
 (Spring Boot 4.0.7, Aura theme, `@Push`), scaffolded from `start.vaadin.com/skeleton`. Run it with
 `cd poc/headlines && ./mvnw spring-boot:run` → <http://localhost:8080> (build/run with a JDK 21).
-It's a flat `Grid<NewsItem>` over a 9-row in-memory fixture, wired exactly per the design above.
+It started as a flat `Grid<NewsItem>` over a 9-row fixture; it has since been **deepened** to a
+`TreeGrid<Row>` showing **live headlines from RSSOwl's own default feeds**, with **grouping** — see
+"Deepening" below. (The fixture remains as an offline fallback.)
 
 We then drove the running app with the **Playwright MCP** as the verification harness. "Before"
 (native SWT) on the left in spirit; "after" (Vaadin, in the browser) below:
@@ -433,6 +436,48 @@ We then drove the running app with the **Playwright MCP** as the verification ha
 | Sort by Title (header click) | ![sorted](after/headlines-sorted-title.png) |
 | Master→detail via a Signal | ![detail](after/headlines-detail.png) |
 | Dynamic `GridContextMenu` (per-row text) | ![context menu](after/headlines-contextmenu.png) |
+
+### Deepening: real RSS feeds + grouping (TreeGrid)
+
+Three follow-ups took the PoC from a fixture to the real, full RSSOwl shape:
+
+**1. Real feeds — RSSOwl's own defaults.** RSSOwl's "Import Recommended Feeds" first-start option
+loads a bundled OPML (`org.rssowl.ui/default_feeds.xml`, 77 feeds). That file is from **2009** and
+most URLs are dead, so we ship our own `feeds.opml` mirroring its category structure — the same
+alphabetical folders (Business, Entertainment, Health, Politics, Science, Sports, Technology, World)
+— populated with **current** section feeds from reliable publishers (BBC, Guardian, NYT, NPR, …).
+A `FeedService` (Rome parser) fetches them concurrently with per-feed timeouts, de-dupes, and maps
+entries to `NewsItem`; if every feed fails (offline/CI) it falls back to the fixture behind a banner.
+A live run logged **"Loaded 800 headlines from 26 feed(s)"** in ~5s.
+
+**2. Grouping via `TreeGrid`.** The flat `Grid` became a single `TreeGrid<Row>` (sealed
+`Row = GroupRow | ItemRow`), with a "Group by" selector (None / Date / Status / Author / Category /
+Feed / Sticky). Grouping is data-shaping into group parents over item children — flat mode is just a
+tree with no children, one codepath. This is exactly the design's "TreeGrid is a superset of Grid".
+
+**3. The full three-pane RSSOwl layout.** On request, the PoC was restructured to match RSSOwl
+structurally: a **left feeds-navigation tree** (`BookMarkExplorer` equivalent — categories →
+feeds, with unread-style counts, e.g. *Business (123)*, alphabetical), a **top-right headlines**
+grid, and a **bottom-right reader** — nested `SplitLayout`s. Selecting a category or feed filters
+the headlines; a second `TreeGrid` (the feeds tree) drives the first.
+
+| What | After (Vaadin 25.1, live data) |
+|---|---|
+| **Three-pane layout** — feeds tree (Business (123) …) ‖ headlines ‖ reader | ![three-pane](after/threepane-layout.png) |
+| Click a feed → headlines filter to it (BBC Business) | ![filtered](after/threepane-filtered.png) |
+| Group by **Feed** — bold group headers with counts, items nested & date-sorted | ![grouped by feed](after/grouped-by-feed.png) |
+| Live headlines from the default feeds | ![live feeds](after/feeds-live.png) |
+
+Verified via Playwright: the left tree lists the categories with real counts (Business 123,
+Sports 152, …); selecting **BBC Business (35)** filters the middle pane to that feed; grouping nests
+items under bold counted headers; selection→detail works on the TreeGrid (Signals); right-clicking a
+**group** row shows **no** context menu (`setDynamicContentHandler` returns `false`). Honest notes:
+counts are **real** (driven by what the live feeds return — not the literal "151" from RSSOwl's old
+screenshot); with all-fresh items **Date grouping collapses to one "Today" bucket** (bucketing works,
+just not varied); BBC sets no per-item author ("Unknown") and Engadget exposes a raw `staff@…`
+author — real RSS is messy. One runtime bug surfaced only by running it: `TreeGrid` throws
+*"Cannot add the same item multiple times"* when feeds repeat a link — fixed by de-duping items by a
+stable 64-bit id before building the tree.
 
 ### What the AI got right, first try
 - The whole structure compiled after **two** real API fixes (below) and ran first launch.
@@ -529,5 +574,7 @@ _(This section is the point of the experiment and grows as we go.)_
 - [x] Build the Vaadin POC of the slice so it actually runs (`poc/headlines/`, runs at :8080).
 - [x] Capture the "after" screenshots (`docs/after/`) and verify behaviour via the Playwright MCP.
 - [x] Fill in the honest-findings section with specifics and an effort estimate.
-- [ ] Stretch (beyond the timebox): grouping via `TreeGrid`, multi-select, auto-mark-read timer,
-      column persistence, direction-aware null sorting; then re-measure effort.
+- [x] Deepen: **real RSS feeds** (RSSOwl's defaults via `FeedService`/Rome) + **grouping** via
+      `TreeGrid` (None/Date/Status/Author/Category/Feed/Sticky) — done; see "Deepening" above.
+- [ ] Stretch (still beyond the timebox): multi-select, auto-mark-read timer, column persistence,
+      direction-aware null sorting; then re-measure effort.
