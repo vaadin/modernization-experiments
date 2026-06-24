@@ -10,6 +10,11 @@ import com.vaadin.flow.component.grid.GridSortOrder;
 import com.vaadin.flow.component.grid.GridVariant;
 import com.vaadin.flow.component.grid.contextmenu.GridContextMenu;
 import com.vaadin.flow.component.grid.contextmenu.GridMenuItem;
+import com.vaadin.flow.component.grid.dnd.GridDropLocation;
+import com.vaadin.flow.component.grid.dnd.GridDropMode;
+import com.vaadin.flow.data.provider.hierarchy.HierarchicalDataProvider.HierarchyFormat;
+import com.vaadin.flow.data.provider.hierarchy.TreeData;
+import com.vaadin.flow.data.provider.hierarchy.TreeDataProvider;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H3;
@@ -66,6 +71,9 @@ public class HeadlinesView extends Div {
     private GroupBy currentGroupBy = GroupBy.NONE;
 
     private final TreeGrid<FeedNode> feedTree = new TreeGrid<>();
+    private TreeData<FeedNode> feedData;
+    private TreeDataProvider<FeedNode> feedDataProvider;
+    private FeedNode.Feed draggedFeed;
     private final TreeGrid<Row> headlines = new TreeGrid<>();
     private final ValueSignal<NewsItem> selected = new ValueSignal<NewsItem>((NewsItem) null);
     private final Map<Row.GroupRow, List<Row>> children = new HashMap<>();
@@ -116,16 +124,15 @@ public class HeadlinesView extends Div {
             if ("Uncategorized".equals(n.category())) ungrouped.add(n);
             else byCat.computeIfAbsent(n.category(), k -> new ArrayList<>()).add(n);
         }
-        List<FeedNode> roots = new ArrayList<>();
-        Map<String, List<FeedNode>> feedsByCategory = new HashMap<>();
+        // Mutable hierarchy so channels can be dragged around (see enableFeedDragAndDrop()).
+        feedData = new TreeData<>();
         for (var e : byCat.entrySet()) {
-            roots.add(new FeedNode.Category(e.getKey(), e.getValue().size()));
+            FeedNode.Category catNode = new FeedNode.Category(e.getKey(), e.getValue().size());
+            feedData.addItem(null, catNode);
             Map<String, Long> byFeed = e.getValue().stream()
                     .collect(Collectors.groupingBy(NewsItem::feed, TreeMap::new, Collectors.counting()));
-            List<FeedNode> feeds = byFeed.entrySet().stream()
-                    .<FeedNode>map(fe -> new FeedNode.Feed(fe.getKey(), e.getKey(), fe.getValue().intValue()))
-                    .toList();
-            feedsByCategory.put(e.getKey(), feeds);
+            byFeed.forEach((feed, count) ->
+                    feedData.addItem(catNode, new FeedNode.Feed(feed, e.getKey(), count.intValue())));
         }
         // Top-level channels = genuinely ungrouped feeds + a few "featured" big outlets that ALSO
         // live in folders (RSSOwl lists e.g. BBC News both inside a folder and as a loose channel).
@@ -134,20 +141,21 @@ public class HeadlinesView extends Div {
         allItems.stream().filter(n -> FEATURED.contains(n.feed()))
                 .forEach(n -> topLevel.merge(n.feed(), 1L, Long::sum));
         topLevel.forEach((feed, count) ->
-                roots.add(new FeedNode.Feed(feed, "Uncategorized", count.intValue())));
+                feedData.addItem(null, new FeedNode.Feed(feed, "Uncategorized", count.intValue())));
 
         // Saved-search smart folders at the bottom (RSSOwl: Unread/Today/Attachments/Sticky/Labeled).
         for (String[] s : SAVED) {
             int c = (int) allItems.stream().filter(savedPredicate(s[1])).count();
-            roots.add(new FeedNode.Saved(s[0], s[1], c));
+            feedData.addItem(null, new FeedNode.Saved(s[0], s[1], c));
         }
 
+        // FLATTENED keeps scroll/expansion stable across refreshAll() after a drag (see Vaadin docs).
+        feedDataProvider = new TreeDataProvider<>(feedData, HierarchyFormat.FLATTENED);
         feedTree.addHierarchyColumn(FeedNode::label).setHeader("Feeds");
-        feedTree.setItems(roots, node ->
-                node instanceof FeedNode.Category c ? feedsByCategory.getOrDefault(c.name(), List.of())
-                        : List.of());
+        feedTree.setDataProvider(feedDataProvider);
         feedTree.setPartNameGenerator(n -> n instanceof FeedNode.Category ? "feed-category"
                 : n instanceof FeedNode.Saved ? "feed-saved" : null);
+        enableFeedDragAndDrop();
 
         feedTree.addSelectionListener(e -> {
             FeedNode sel = e.getFirstSelectedItem().orElse(null);
@@ -162,6 +170,68 @@ public class HeadlinesView extends Div {
             }
             applyGrouping(currentGroupBy);
         });
+    }
+
+    /**
+     * Mouse drag-and-drop reordering of the feeds tree, like RSSOwl's BookMarkExplorer. Only channels
+     * (Feed nodes) are draggable; category folders and saved-search folders stay put. Dropping a
+     * channel reorders it among its siblings, drops it <em>into</em> a folder (drop on top of one), or
+     * pops it back out to the top level — depending on where you release.
+     */
+    private void enableFeedDragAndDrop() {
+        feedTree.setRowsDraggable(true);
+        feedTree.setDragFilter(n -> n instanceof FeedNode.Feed);
+        // Set the drop mode once, up front, rather than inside dragStart: a per-drag setDropMode
+        // only reaches the client after a server round-trip, which can make the first drop after
+        // grab flaky. It has no visible effect except while a drag is actually in progress.
+        feedTree.setDropMode(GridDropMode.ON_TOP_OR_BETWEEN);
+
+        feedTree.addDragStartListener(e -> {
+            FeedNode n = e.getDraggedItems().get(0);
+            draggedFeed = (n instanceof FeedNode.Feed f) ? f : null;
+        });
+        feedTree.addDragEndListener(e -> draggedFeed = null);
+        feedTree.addDropListener(e -> {
+            FeedNode target = e.getDropTargetItem().orElse(null);
+            if (draggedFeed == null || target == null || target.equals(draggedFeed)) {
+                return;
+            }
+            moveFeed(draggedFeed, target, e.getDropLocation());
+            feedDataProvider.refreshAll();
+            feedTree.select(draggedFeed); // keep the moved channel selected, like RSSOwl
+        });
+    }
+
+    /** Re-parents/reorders {@code dragged} relative to {@code target} for the given drop location. */
+    private void moveFeed(FeedNode.Feed dragged, FeedNode target, GridDropLocation loc) {
+        if (target instanceof FeedNode.Category cat) {
+            if (loc == GridDropLocation.ON_TOP) {
+                feedData.setParent(dragged, cat);  // drop INTO the folder
+            } else {
+                feedData.setParent(dragged, null); // reorder at top level, around the folder
+                placeRelative(dragged, null, cat, loc);
+            }
+        } else if (target instanceof FeedNode.Feed tf) {
+            FeedNode parent = feedData.getParent(tf); // null => top level
+            feedData.setParent(dragged, parent);
+            // A feed can't nest under another feed, so treat ON_TOP of a feed as "after".
+            placeRelative(dragged, parent, tf, loc == GridDropLocation.ABOVE ? loc : GridDropLocation.BELOW);
+        } else { // a Saved smart folder — keep channels above it; reorder at top level
+            feedData.setParent(dragged, null);
+            placeRelative(dragged, null, target, loc == GridDropLocation.ABOVE ? loc : GridDropLocation.BELOW);
+        }
+    }
+
+    /** Positions {@code dragged} immediately above/below {@code target} among {@code parent}'s children. */
+    private void placeRelative(FeedNode.Feed dragged, FeedNode parent, FeedNode target, GridDropLocation loc) {
+        if (loc != GridDropLocation.ABOVE) {
+            feedData.moveAfterSibling(dragged, target);
+        } else {
+            List<FeedNode> sibs = new ArrayList<>(feedData.getChildren(parent));
+            sibs.remove(dragged);
+            int idx = sibs.indexOf(target);
+            feedData.moveAfterSibling(dragged, idx <= 0 ? null : sibs.get(idx - 1)); // null => first
+        }
     }
 
     private Component buildToolbar(FeedService feedService) {

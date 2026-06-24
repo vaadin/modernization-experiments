@@ -584,6 +584,37 @@ half a focused day with AI assistance. The full ~13–18-day estimate for the co
 (§ design) still stands — the long pole is the items this POC deliberately left out plus the
 owner-draw fidelity, not the parts shown here.
 
+### Day 2 — drag-and-drop feed reordering (and a doubt worth recording)
+
+The original RSSOwl lets you drag channels around the feeds tree with the mouse; the POC's tree was
+static. Added it: only **channels** (Feed nodes) are draggable — category folders and saved-search
+folders stay put (`setDragFilter`) — and a drop either reorders a channel among its siblings, drops
+it *into* a folder (release on top of one), or pops it back out to the top level. Implemented by
+moving the tree off the immutable `setItems(roots, childProvider)` form onto a mutable
+`TreeData` + `TreeDataProvider`, then `setParent` / `moveAfterSibling` + `refreshAll()` on drop.
+Verified by driving a real HTML5 drag in the browser: RSSOwlnix News reordered above BBC News, and
+Wired dragged into the Business folder (and left the top level).
+
+Two things this surfaced, both honest:
+
+- **A latency trap in the documented pattern.** Vaadin's official example sets the drop mode *inside*
+  `dragStart`. Because `setDropMode` only reaches the client after a server round-trip, the very first
+  drop after grabbing a row can be missed if you release quickly. Setting the drop mode **once at
+  setup** (it has no visible effect except during an active drag) removed the flakiness. This only
+  became visible by testing the drag programmatically with no human-scale pause between grab and drop.
+
+- **A doubt the user raised, recorded verbatim:** *"you are removing HierarchyFormat.FLATTENED and I
+  wonder why? We do want a stable tree, especially when // FLATTENED keeps scroll/expansion stable
+  across refreshAll() after a drag."* The doubt was correct and caught a real mistake. I had dropped
+  `HierarchyFormat.FLATTENED` only because the import wouldn't compile — the wrong reason to abandon a
+  feature we want. Investigating showed the class **does** exist in the resolved jar (flow-data
+  25.1.7); it is a **nested** type, `HierarchicalDataProvider.HierarchyFormat`, not the top-level
+  `com.vaadin.flow.data.provider.hierarchy.HierarchyFormat` the MCP doc's import comment implied
+  (`javap` confirmed both the constant and the `TreeDataProvider(TreeData, HierarchyFormat)`
+  constructor). FLATTENED was restored with the correct import. **Finding:** the MCP docs were right
+  that the feature exists, but the *import path shown was wrong* — and "it didn't compile" is not a
+  valid reason to remove desired behaviour; the fix is to find out *why* it didn't compile.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_
