@@ -42,7 +42,10 @@ import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.signals.Signal;
 import com.vaadin.flow.signals.local.ValueSignal;
+import com.vaadin.flow.spring.security.AuthenticationContext;
+import com.example.headlines.service.UserNewsService;
 import jakarta.annotation.security.PermitAll;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -57,8 +60,8 @@ import java.util.stream.Collectors;
 /**
  * POC matching RSSOwl(nix)'s three-pane structure: left = a feeds-navigation tree
  * (Category → Feed, with counts), top-right = the headlines {@link TreeGrid} (sortable, groupable),
- * bottom-right = the article reader. Live headlines come from RSSOwl's default feeds
- * ({@link FeedService}); selection→reader is wired with Vaadin Signals.
+ * bottom-right = the article reader. Headlines are the current Keycloak user's own subscriptions and
+ * read/sticky state ({@link UserNewsService}); selection→reader is wired with Vaadin Signals.
  */
 @Route("")
 @PageTitle("Headlines — SWT→Vaadin POC")
@@ -91,9 +94,24 @@ public class HeadlinesView extends Div {
     private final Map<Row.GroupRow, List<Row>> children = new HashMap<>();
     private com.vaadin.flow.component.grid.Grid.Column<Row> dateColumn;
 
-    public HeadlinesView(FeedService feedService) {
+    private final UserNewsService news;
+    private final AuthenticationContext authContext;
+    private final String subject;      // Keycloak subject — the per-user key
+    private final String displayName;  // for the header
+
+    public HeadlinesView(UserNewsService news, AuthenticationContext authContext) {
+        this.news = news;
+        this.authContext = authContext;
+        OidcUser user = authContext.getAuthenticatedUser(OidcUser.class)
+                .orElseThrow(() -> new IllegalStateException("No authenticated user"));
+        this.subject = user.getSubject();
+        this.displayName = user.getPreferredUsername() != null ? user.getPreferredUsername() : user.getName();
+
+        // First login for this user? Seed their default subscriptions, then load their headlines.
+        news.ensureSeeded(subject);
+
         setSizeFull();
-        this.allItems = feedService.items();
+        this.allItems = news.newsItems(subject);
         this.currentItems = allItems;
 
         configureFeedTree();
@@ -103,7 +121,7 @@ public class HeadlinesView extends Div {
         Div reader = buildReactiveReader();
 
         // top-right (headlines + a small toolbar) over bottom-right (reader)
-        VerticalLayout headlinesPane = new VerticalLayout(buildToolbar(feedService), headlines);
+        VerticalLayout headlinesPane = new VerticalLayout(buildToolbar(), headlines);
         headlinesPane.setSizeFull();
         headlinesPane.setPadding(false);
         headlinesPane.setSpacing(false);
@@ -246,7 +264,7 @@ public class HeadlinesView extends Div {
         }
     }
 
-    private Component buildToolbar(FeedService feedService) {
+    private Component buildToolbar() {
         Select<GroupBy> groupBy = new Select<>();
         groupBy.setLabel("Group by");
         groupBy.setItems(GroupBy.values());
@@ -257,14 +275,17 @@ public class HeadlinesView extends Div {
             applyGrouping(currentGroupBy);
         });
 
-        HorizontalLayout bar = new HorizontalLayout(groupBy);
+        // Signed-in identity + logout (multi-user: proves whose data this is).
+        Span who = new Span("Signed in as " + displayName);
+        who.getStyle().set("align-self", "center").set("color", "var(--vaadin-text-color-secondary, #666)");
+        Button logout = new Button("Log out", e -> authContext.logout());
+        logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+
+        HorizontalLayout bar = new HorizontalLayout(groupBy, who, logout);
         bar.setAlignItems(FlexComponent.Alignment.END);
+        bar.setWidthFull();
+        bar.setFlexGrow(1, who); // push logout to the right
         bar.getStyle().set("padding", "0.4rem 1rem");
-        if (feedService.isFallback()) {
-            Span banner = new Span("⚠ Live feeds unreachable — showing bundled demo data.");
-            banner.getStyle().set("color", "#b00").set("align-self", "center");
-            bar.add(banner);
-        }
         return bar;
     }
 
@@ -450,6 +471,7 @@ public class HeadlinesView extends Div {
     private void toggleReadAndRefresh(Row row) {
         if (row instanceof Row.ItemRow ir) {
             ir.news().toggleRead();
+            news.setRead(subject, ir.news().id(), !ir.news().unread()); // persist per-user
             headlines.getDataProvider().refreshItem(ir);
         }
     }
@@ -457,6 +479,7 @@ public class HeadlinesView extends Div {
     private void toggleStickyAndRefresh(Row row) {
         if (row instanceof Row.ItemRow ir) {
             ir.news().toggleSticky();
+            news.setSticky(subject, ir.news().id(), ir.news().sticky()); // persist per-user
             headlines.getDataProvider().refreshItem(ir);
         }
     }
