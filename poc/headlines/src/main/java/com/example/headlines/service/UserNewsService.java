@@ -42,8 +42,10 @@ import java.util.stream.Collectors;
 @Service
 public class UserNewsService {
 
-    /** What the feeds tree needs about one subscription, detached from JPA lazy state. */
-    public record FeedRef(long subscriptionId, String title, String folder, int position) {}
+    /** What the feeds tree needs about one subscription, detached from JPA lazy state.
+     *  {@code authUsername} is non-null when the feed has stored HTTP credentials. */
+    public record FeedRef(long subscriptionId, String title, String folder, int position,
+            String url, String authUsername) {}
 
     private final FeedRepository feeds;
     private final ArticleRepository articles;
@@ -74,7 +76,8 @@ public class UserNewsService {
     @Transactional(readOnly = true)
     public List<FeedRef> feedRefs(String subject) {
         return subscriptions.findByOwnerOrderByFolderAscPositionAsc(subject).stream()
-                .map(s -> new FeedRef(s.getId(), s.displayTitle(), s.getFolder(), s.getPosition()))
+                .map(s -> new FeedRef(s.getId(), s.displayTitle(), s.getFolder(), s.getPosition(),
+                        s.getFeed().getUrl(), s.getAuthUsername()))
                 .toList();
     }
 
@@ -143,14 +146,37 @@ public class UserNewsService {
         }
     }
 
-    /** Subscribe the user to a feed by URL (creating the shared {@link Feed} if new). */
+    /** Subscribe the user to a feed by URL (creating the shared {@link Feed} if new), with optional
+     *  HTTP credentials for an auth-gated feed. */
     @Transactional
-    public void addSubscription(String subject, String url, String title, String folder) {
+    public void addSubscription(String subject, String url, String title, String folder,
+            String username, String password) {
         Feed feed = feeds.findByUrl(url).orElseGet(() -> feeds.save(new Feed(url, title, folder)));
-        if (subscriptions.findByOwnerAndFeed(subject, feed).isPresent()) return;
+        Subscription existing = subscriptions.findByOwnerAndFeed(subject, feed).orElse(null);
+        if (existing != null) { // already subscribed — just refresh its credentials
+            applyCredentials(existing, username, password);
+            subscriptions.save(existing);
+            return;
+        }
         int nextPos = subscriptions.findByOwnerOrderByFolderAscPositionAsc(subject).size();
-        subscriptions.save(new Subscription(subject, feed,
-                (folder == null || folder.isBlank()) ? null : folder, nextPos));
+        Subscription sub = new Subscription(subject, feed,
+                (folder == null || folder.isBlank()) ? null : folder, nextPos);
+        applyCredentials(sub, username, password);
+        subscriptions.save(sub);
+    }
+
+    /** Set, update, or clear (blank username) the HTTP credentials on one of the user's feeds. */
+    @Transactional
+    public void setCredentials(String subject, long subscriptionId, String username, String password) {
+        subscriptions.findById(subscriptionId)
+                .filter(s -> s.getOwner().equals(subject))
+                .ifPresent(s -> { applyCredentials(s, username, password); subscriptions.save(s); });
+    }
+
+    private static void applyCredentials(Subscription s, String username, String password) {
+        boolean has = username != null && !username.isBlank();
+        s.setAuthUsername(has ? username.trim() : null);
+        s.setAuthPassword(has ? password : null);
     }
 
     @Transactional

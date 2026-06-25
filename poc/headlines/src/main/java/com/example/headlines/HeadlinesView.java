@@ -22,7 +22,9 @@ import com.vaadin.flow.component.grid.contextmenu.GridContextMenu;
 import com.vaadin.flow.component.grid.contextmenu.GridMenuItem;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.notification.Notification;
+import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
+import com.example.headlines.service.AuthenticationRequiredException;
 import com.vaadin.flow.component.grid.dnd.GridDropLocation;
 import com.vaadin.flow.component.grid.dnd.GridDropMode;
 import com.vaadin.flow.data.provider.hierarchy.HierarchicalDataProvider.HierarchyFormat;
@@ -183,8 +185,12 @@ public class HeadlinesView extends Div {
             applyGrouping(currentGroupBy);
         });
 
-        // Right-click a channel to unsubscribe (RSSOwl: "Delete" on a bookmark). Feeds only.
+        // Right-click a channel: set HTTP credentials or unsubscribe (RSSOwl bookmark actions).
+        // Feeds only.
         GridContextMenu<FeedNode> feedMenu = feedTree.addContextMenu();
+        feedMenu.addItem("Set credentials…", e -> e.getItem()
+                .filter(n -> n instanceof FeedNode.Feed)
+                .ifPresent(n -> openCredentialsDialog((FeedNode.Feed) n)));
         feedMenu.addItem("Unsubscribe", e -> e.getItem().ifPresent(this::unsubscribe));
         feedMenu.setDynamicContentHandler(node -> node instanceof FeedNode.Feed);
     }
@@ -199,7 +205,12 @@ public class HeadlinesView extends Div {
         title.setWidthFull();
         TextField folder = new TextField("Folder (optional)");
         folder.setWidthFull();
-        VerticalLayout form = new VerticalLayout(url, title, folder);
+        // Optional HTTP credentials, like RSSOwl's per-feed authentication.
+        TextField user = new TextField("Username (optional)");
+        user.setWidthFull();
+        PasswordField pass = new PasswordField("Password (optional)");
+        pass.setWidthFull();
+        VerticalLayout form = new VerticalLayout(url, title, folder, user, pass);
         form.setPadding(false);
         dialog.add(form);
 
@@ -211,14 +222,55 @@ public class HeadlinesView extends Div {
                 return;
             }
             String t = title.getValue().isBlank() ? u : title.getValue().trim();
-            news.addSubscription(subject, u, t, folder.getValue().trim());
-            feedFetch.refreshByUrl(u); // pull its articles now so it isn't empty
+            news.addSubscription(subject, u, t, folder.getValue().trim(), user.getValue(), pass.getValue());
+            try {
+                feedFetch.refreshByUrl(u, user.getValue().trim(), pass.getValue()); // fetch now
+            } catch (AuthenticationRequiredException auth) {
+                pass.setInvalid(true);
+                pass.setErrorMessage("Authentication failed (401) — check username/password");
+                reloadUserData(); // the subscription is saved; let them fix the password and retry
+                return;
+            }
             reloadUserData();
             dialog.close();
             Notification.show("Subscribed to " + t);
         });
         add.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
         dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), add);
+        dialog.open();
+    }
+
+    /** Login dialog for a feed's HTTP credentials (RSSOwl: "Feed requires authentication"). */
+    private void openCredentialsDialog(FeedNode.Feed feed) {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle("Feed requires authentication");
+        Span msg = new Span("Enter the username and password for \"" + feed.name() + "\".");
+        TextField user = new TextField("Username");
+        user.setWidthFull();
+        if (feed.authUsername() != null) user.setValue(feed.authUsername());
+        PasswordField pass = new PasswordField("Password");
+        pass.setWidthFull();
+        VerticalLayout form = new VerticalLayout(msg, user, pass);
+        form.setPadding(false);
+        dialog.add(form);
+
+        Button save = new Button("Save", e -> {
+            news.setCredentials(subject, feed.subscriptionId(), user.getValue(), pass.getValue());
+            try {
+                feedFetch.refreshByUrl(feed.url(), user.getValue().trim(), pass.getValue());
+            } catch (AuthenticationRequiredException auth) {
+                pass.setInvalid(true);
+                pass.setErrorMessage("Authentication failed (401) — check username/password");
+                return;
+            }
+            reloadUserData();
+            dialog.close();
+            Notification.show(user.getValue().isBlank()
+                    ? "Cleared credentials for " + feed.name()
+                    : "Credentials saved for " + feed.name());
+        });
+        save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), save);
         dialog.open();
     }
 
@@ -264,12 +316,14 @@ public class HeadlinesView extends Div {
             feedData.addItem(null, cat);
             for (UserNewsService.FeedRef r : e.getValue()) { // already in saved position order
                 feedData.addItem(cat, new FeedNode.Feed(r.title(), e.getKey(),
-                        countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId()));
+                        countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId(),
+                        r.url(), r.authUsername()));
             }
         }
         for (UserNewsService.FeedRef r : topLevel) {
             feedData.addItem(null, new FeedNode.Feed(r.title(), "Uncategorized",
-                    countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId()));
+                    countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId(),
+                    r.url(), r.authUsername()));
         }
         for (String[] s : SAVED) {
             int c = (int) allItems.stream().filter(savedPredicate(s[1])).count();

@@ -14,6 +14,7 @@ import com.example.headlines.data.Article;
 import com.example.headlines.data.ArticleRepository;
 import com.example.headlines.data.Feed;
 import com.example.headlines.data.FeedRepository;
+import com.example.headlines.data.Subscription;
 import com.rometools.rome.feed.synd.SyndEntry;
 import com.rometools.rome.feed.synd.SyndFeed;
 import com.rometools.rome.io.SyndFeedInput;
@@ -59,15 +60,18 @@ public class FeedFetchService {
 
     private final FeedRepository feeds;
     private final ArticleRepository articles;
+    private final com.example.headlines.data.SubscriptionRepository subscriptions;
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
-    public FeedFetchService(FeedRepository feeds, ArticleRepository articles) {
+    public FeedFetchService(FeedRepository feeds, ArticleRepository articles,
+            com.example.headlines.data.SubscriptionRepository subscriptions) {
         this.feeds = feeds;
         this.articles = articles;
+        this.subscriptions = subscriptions;
     }
 
     private record Raw(String link, String title, String author, LocalDateTime date, boolean attachments) {}
@@ -97,7 +101,14 @@ public class FeedFetchService {
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(all.size(), 12));
         try {
             List<Future<List<Raw>>> futures = new ArrayList<>();
-            for (Feed f : all) futures.add(pool.submit(() -> fetchRaw(f)));
+            for (Feed f : all) {
+                // An auth-gated feed is fetched with a subscriber's stored credentials (PoC: the first
+                // credentialed subscription; in a single-user world this is just "the" credentials).
+                Subscription cred = subscriptions.findFirstByFeedAndAuthUsernameIsNotNull(f).orElse(null);
+                String user = cred != null ? cred.getAuthUsername() : null;
+                String pass = cred != null ? cred.getAuthPassword() : null;
+                futures.add(pool.submit(() -> fetchRaw(f, user, pass)));
+            }
             int saved = 0;
             for (int i = 0; i < all.size(); i++) {
                 Feed f = all.get(i);
@@ -113,23 +124,39 @@ public class FeedFetchService {
         }
     }
 
-    /** Fetch + persist a single feed now — used when a user subscribes to a new feed. */
-    public void refreshByUrl(String url) {
+    /**
+     * Fetch + persist a single feed now, using the given credentials (may be null) — used when a user
+     * subscribes to a new feed or sets/updates its credentials. Propagates
+     * {@link AuthenticationRequiredException} (HTTP 401) so the UI can prompt for login.
+     */
+    public void refreshByUrl(String url, String user, String pass) {
         feeds.findByUrl(url).ifPresent(f -> {
             try {
-                persist(f, fetchRaw(f));
+                persist(f, fetchRaw(f, user, pass));
+            } catch (AuthenticationRequiredException auth) {
+                throw auth; // let the caller turn this into a login prompt
             } catch (Exception e) {
                 log.warn("Fetch failed for {}: {}", url, e.toString());
             }
         });
     }
 
-    private List<Raw> fetchRaw(Feed f) throws Exception {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(f.getUrl()))
+    private List<Raw> fetchRaw(Feed f, String user, String pass) throws Exception {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(f.getUrl()))
                 .timeout(PER_FEED_TIMEOUT)
-                .header("User-Agent", "headlines-poc/1.0 (+https://vaadin.com)")
-                .GET().build();
-        HttpResponse<InputStream> resp = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
+                .header("User-Agent", "headlines-poc/1.0 (+https://vaadin.com)");
+        if (user != null && !user.isBlank()) {
+            String basic = java.util.Base64.getEncoder()
+                    .encodeToString((user + ":" + (pass == null ? "" : pass)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            b.header("Authorization", "Basic " + basic);
+        }
+        HttpResponse<InputStream> resp = http.send(b.GET().build(), HttpResponse.BodyHandlers.ofInputStream());
+        if (resp.statusCode() == 401) {
+            resp.body().close();
+            String realm = resp.headers().firstValue("WWW-Authenticate")
+                    .map(FeedFetchService::parseRealm).orElse(null);
+            throw new AuthenticationRequiredException(f.getUrl(), realm);
+        }
         List<Raw> out = new ArrayList<>();
         try (InputStream in = resp.body()) {
             SyndFeed feed = new SyndFeedInput().build(new XmlReader(in));
@@ -167,5 +194,11 @@ public class FeedFetchService {
 
     private static String blankTo(String s, String dflt) {
         return (s == null || s.isBlank()) ? dflt : s;
+    }
+
+    /** Pull the realm out of a {@code WWW-Authenticate: Basic realm="..."} header, if present. */
+    private static String parseRealm(String wwwAuthenticate) {
+        var m = java.util.regex.Pattern.compile("realm=\"([^\"]*)\"").matcher(wwwAuthenticate);
+        return m.find() ? m.group(1) : null;
     }
 }

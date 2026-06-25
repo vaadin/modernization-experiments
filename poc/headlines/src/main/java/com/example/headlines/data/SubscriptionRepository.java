@@ -19,4 +19,7 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, Long
     List<Subscription> findByOwnerOrderByFolderAscPositionAsc(String owner);
     Optional<Subscription> findByOwnerAndFeed(String owner, Feed feed);
     boolean existsByOwner(String owner);
+
+    /** Any subscription carrying credentials for this feed — used to fetch an auth-gated feed. */
+    Optional<Subscription> findFirstByFeedAndAuthUsernameIsNotNull(Feed feed);
 }

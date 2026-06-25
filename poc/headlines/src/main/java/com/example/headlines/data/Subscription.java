@@ -48,6 +48,11 @@ public class Subscription {
 
     private String titleOverride; // optional per-user rename; falls back to feed title
 
+    // Per-feed HTTP authentication (like RSSOwl's per-bookmark credentials), stored per user.
+    // PoC: stored as-is; a real deployment would encrypt at rest / use a secret store.
+    private String authUsername;
+    private String authPassword;
+
     protected Subscription() { }
 
     public Subscription(String owner, Feed feed, String folder, int position) {
@@ -66,6 +71,15 @@ public class Subscription {
     public void setPosition(int position) { this.position = position; }
     public String getTitleOverride() { return titleOverride; }
     public void setTitleOverride(String titleOverride) { this.titleOverride = titleOverride; }
+    public String getAuthUsername() { return authUsername; }
+    public void setAuthUsername(String authUsername) { this.authUsername = authUsername; }
+    public String getAuthPassword() { return authPassword; }
+    public void setAuthPassword(String authPassword) { this.authPassword = authPassword; }
+
+    /** True when this subscription carries HTTP credentials to use when fetching the feed. */
+    public boolean hasCredentials() {
+        return authUsername != null && !authUsername.isBlank();
+    }
 
     /** Display title: the per-user override if set, else the feed's own title. */
     public String displayTitle() {

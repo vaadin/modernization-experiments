@@ -24,9 +24,13 @@ public sealed interface FeedNode permits FeedNode.Category, FeedNode.Feed, FeedN
     }
 
     /** {@code subscriptionId} ties the node to its persisted {@code Subscription} so drag-and-drop
-     *  reordering can be saved per user. */
-    record Feed(String name, String category, int count, long subscriptionId) implements FeedNode {
-        @Override public String label() { return name + "  (" + count + ")"; }
+     *  reordering can be saved per user. {@code url} is the feed URL (for re-fetching after a
+     *  credentials change); {@code authUsername} is non-null when the feed has stored HTTP
+     *  credentials (a lock is shown in the label, like an authenticated bookmark). */
+    record Feed(String name, String category, int count, long subscriptionId, String url,
+            String authUsername) implements FeedNode {
+        boolean hasAuth() { return authUsername != null && !authUsername.isBlank(); }
+        @Override public String label() { return (hasAuth() ? "🔒 " : "") + name + "  (" + count + ")"; }
     }
 
     /** A saved-search "smart folder" (RSSOwl: Unread News, Today's News, …). {@code key} selects the
