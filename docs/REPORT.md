@@ -628,6 +628,43 @@ Two things this surfaced, both honest:
   that the feature exists, but the *import path shown was wrong* — and "it didn't compile" is not a
   valid reason to remove desired behaviour; the fix is to find out *why* it didn't compile.
 
+### Day 3 — multi-user (Keycloak SSO + per-user data), on branch `multi-user`
+
+The single-state PoC became a real multi-user app: **OIDC login against an existing Keycloak** (Spring
+Security OAuth2 client; identity = the Keycloak subject) over **Spring Data JPA + H2**, with everything
+per-user — subscriptions, feed folders, drag order, and read/sticky/label state — seeded from the
+default `feeds.opml` on first login. The data model splits *shared* (`Feed`, `Article`, fetched once)
+from *per-user* (`Subscription`, `ArticleState`, keyed by subject). The view (`HeadlinesView`) reads
+the logged-in user via Vaadin's `AuthenticationContext`, with a "Signed in as … / Log out" header.
+
+Verified end-to-end in the browser with two Keycloak users: alice and bob each get their own
+subscriptions; alice marking an article read **persists across reload** (it's in H2) and does **not**
+affect bob; dragging a channel to a new position/folder **persists per user** (confirmed in the DB —
+each owner has independent `Subscription` positions); adding a feed (`https://hnrss.org/frontpage` →
+"Hacker News") fetched 52 articles and appeared in the tree, surviving reload.
+
+Honest findings from this slice:
+- **Vaadin 25 changed the security API.** The base class `VaadinWebSecurity` is gone; you configure a
+  `SecurityFilterChain` with `VaadinSecurityConfigurer` + `oauth2LoginPage(...)`. Following a pre-25
+  tutorial would not compile. (Confirmed against the MCP docs and the jar.)
+- **Views need an explicit access annotation.** After enabling security, an authenticated user still
+  got "Consider adding @AnonymousAllowed / @PermitAll" — the view must be annotated (`@PermitAll`).
+- **Keycloak's default `sslRequired=external` blocks plain-HTTP OIDC** from non-localhost — both the
+  server's discovery fetch *and* the browser login redirect. For a dev realm over http you must set
+  `sslRequired=NONE` (or put TLS in front). Diagnosed from a `403 {"error_description":"HTTPS
+  required"}`; a one-shot `kcadm` script (`keycloak/setup-keycloak.sh`) creates the realm/client/users
+  and relaxes it.
+- **Secrets discipline:** the auto-mode safety classifier (correctly) blocked putting the client
+  secret inline on a command line; it now lives in a git-ignored `.env.local` sourced by `run.sh`.
+- **Restart auto-SSO gotcha:** after a server restart the browser silently re-logs-in the *last*
+  Keycloak user (SSO cookie still valid). This briefly looked like a data leak until the DB showed each
+  user's rows were correctly independent — a reminder to check identity, not assume it, when verifying
+  multi-user behaviour.
+- **Vaadin `GridContextMenu` doesn't open under Playwright's synthetic right-click** (reproduced on
+  the known-working headlines menu), so the "Unsubscribe" item is verified by parity with that menu
+  rather than by automation — a real right-click works for a user. A genuine limitation of the test
+  harness, not the app.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_
