@@ -1,0 +1,81 @@
+/*
+ * Copyright (c) 2026 Vaadin Ltd.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License v1.0 which accompanies this distribution,
+ * and is available at https://www.eclipse.org/legal/epl-v10.html
+ *
+ * SPDX-License-Identifier: EPL-1.0
+ */
+
+package com.example.headlines;
+
+import com.example.headlines.NewsItem.State;
+import com.example.headlines.service.FeedFetchService;
+import com.example.headlines.service.UserNewsService;
+import com.vaadin.browserless.BrowserlessTest;
+import com.vaadin.browserless.ViewPackages;
+import com.vaadin.flow.component.UI;
+import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.treegrid.TreeGrid;
+import org.junit.jupiter.api.Test;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+/**
+ * Browserless (in-JVM, no real browser) UI test of {@link HeadlinesView} using Vaadin's
+ * {@code browserless-test-junit6} harness. Renders the view for a mocked authenticated user with
+ * mocked services and asserts the three-pane structure + the signed-in identity. This is the tier
+ * that can drive Vaadin components directly — including the {@code GridContextMenu} that a raw
+ * Playwright synthetic right-click could not open.
+ */
+// Scan an empty package so the harness doesn't auto-navigate to HeadlinesView's "" route (which has
+// no no-arg constructor). We add the view manually, built with mocked dependencies, instead.
+@ViewPackages(packages = "com.example.headlines.noroutes")
+class HeadlinesViewBrowserlessTest extends BrowserlessTest {
+
+    private HeadlinesView buildViewForAlice() {
+        OidcUser oidc = mock(OidcUser.class);
+        when(oidc.getSubject()).thenReturn("alice-subject");
+        when(oidc.getPreferredUsername()).thenReturn("alice");
+
+        var auth = mock(com.vaadin.flow.spring.security.AuthenticationContext.class);
+        when(auth.getAuthenticatedUser(OidcUser.class)).thenReturn(java.util.Optional.of(oidc));
+
+        var news = mock(UserNewsService.class);
+        when(news.feedRefs("alice-subject")).thenReturn(List.of(
+                new UserNewsService.FeedRef(1L, "BBC News", null, 0, "https://bbc/rss", null)));
+        when(news.newsItems("alice-subject")).thenReturn(List.of(
+                new NewsItem(1, "Headline one", "Reporter", "Uncategorized", "BBC News",
+                        LocalDateTime.of(2026, 1, 1, 0, 0), State.UNREAD, false, null, "https://x/1", false)));
+
+        var fetch = mock(FeedFetchService.class);
+        return new HeadlinesView(news, fetch, auth);
+    }
+
+    @Test
+    void rendersThreePaneStructureForAuthenticatedUser() {
+        UI.getCurrent().add(buildViewForAlice());
+
+        // feeds tree + headlines tree
+        assertEquals(2, $(TreeGrid.class).all().size(), "feeds tree + headlines grid");
+
+        // signed-in identity in the header
+        boolean signedInShown = $(Span.class).all().stream()
+                .anyMatch(s -> "Signed in as alice".equals(s.getText()));
+        assertTrue(signedInShown, "header shows the authenticated user");
+
+        // the RSSOwl-style actions are present
+        var buttonTexts = $(Button.class).all().stream().map(Button::getText).toList();
+        assertTrue(buttonTexts.contains("Add feed"), "Add feed button present");
+        assertTrue(buttonTexts.contains("Log out"), "Log out button present");
+    }
+}
