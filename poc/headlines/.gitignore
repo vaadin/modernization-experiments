@@ -12,3 +12,9 @@
 node_modules/
 src/main/frontend/generated/
 vite.generated.ts
+
+# H2 database (per-user state) — do not commit
+/data/
+
+# Local secrets (Keycloak client secret etc.) — never commit
+.env.local

@@ -42,6 +42,7 @@ import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.signals.Signal;
 import com.vaadin.flow.signals.local.ValueSignal;
+import jakarta.annotation.security.PermitAll;
 
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -61,6 +62,7 @@ import java.util.stream.Collectors;
  */
 @Route("")
 @PageTitle("Headlines — SWT→Vaadin POC")
+@PermitAll // any authenticated Keycloak user may open the app
 public class HeadlinesView extends Div {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
