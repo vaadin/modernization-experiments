@@ -51,12 +51,13 @@ class UserNewsServiceTest {
     @Autowired ArticleRepository articles;
     @Autowired SubscriptionRepository subscriptions;
     @Autowired ArticleStateRepository states;
+    @Autowired com.example.headlines.data.FolderPrefRepository folderPrefs;
 
     private UserNewsService svc;
 
     @BeforeEach
     void setUp() {
-        svc = new UserNewsService(feeds, articles, subscriptions, states);
+        svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs);
     }
 
     @Test
@@ -130,6 +131,16 @@ class UserNewsServiceTest {
         // alice must not be able to remove bob's subscription
         svc.removeSubscription(ALICE, bobs.getId());
         assertEquals(1, svc.feedRefs(BOB).size(), "bob's subscription survives alice's call");
+    }
+
+    @Test
+    void reorderFoldersPersistsFolderOrder() {
+        svc.reorderFolders(ALICE, List.of("News", "Business", "Science"));
+        assertEquals(List.of("News", "Business", "Science"), svc.folderOrder(ALICE));
+
+        // re-ordering again updates positions (idempotent upsert, no duplicates)
+        svc.reorderFolders(ALICE, List.of("Science", "News", "Business"));
+        assertEquals(List.of("Science", "News", "Business"), svc.folderOrder(ALICE));
     }
 
     @Test

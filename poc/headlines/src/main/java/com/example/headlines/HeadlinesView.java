@@ -89,7 +89,7 @@ public class HeadlinesView extends Div {
     private final TreeGrid<FeedNode> feedTree = new TreeGrid<>();
     private TreeData<FeedNode> feedData;
     private TreeDataProvider<FeedNode> feedDataProvider;
-    private FeedNode.Feed draggedFeed;
+    private FeedNode draggedNode;
     private final TreeGrid<Row> headlines = new TreeGrid<>();
     private final ValueSignal<NewsItem> selected = new ValueSignal<NewsItem>((NewsItem) null);
     private final Map<Row.GroupRow, List<Row>> children = new HashMap<>();
@@ -302,8 +302,9 @@ public class HeadlinesView extends Div {
 
     /**
      * (Re)builds the tree's {@link TreeData} from the current user's persisted {@code Subscription}s:
-     * category folders (alphabetical) with their feeds in saved drag order, then top-level ungrouped
-     * channels, then the saved-search smart folders. Article counts come from the loaded headlines.
+     * category folders (in saved drag order, else alphabetical) with their feeds in saved drag order,
+     * then top-level ungrouped channels, then the saved-search smart folders. Article counts come from
+     * the loaded headlines.
      */
     private void buildFeedTreeData() {
         feedData = new TreeData<>();
@@ -311,19 +312,26 @@ public class HeadlinesView extends Div {
                 .collect(Collectors.groupingBy(NewsItem::feed, Collectors.counting()));
 
         List<UserNewsService.FeedRef> refs = news.feedRefs(subject); // folder asc, position asc
-        Map<String, List<UserNewsService.FeedRef>> byFolder = new TreeMap<>(); // categories, alphabetical
+        Map<String, List<UserNewsService.FeedRef>> byFolder = new TreeMap<>(); // alphabetical default
         List<UserNewsService.FeedRef> topLevel = new ArrayList<>();
         for (UserNewsService.FeedRef r : refs) {
             if (r.folder() == null || r.folder().isBlank()) topLevel.add(r);
             else byFolder.computeIfAbsent(r.folder(), k -> new ArrayList<>()).add(r);
         }
-        for (var e : byFolder.entrySet()) {
-            int catCount = e.getValue().stream()
+        // Order folders by the user's saved drag order; any not saved fall back to alphabetical.
+        List<String> savedOrder = news.folderOrder(subject);
+        List<String> folders = new ArrayList<>(byFolder.keySet());
+        folders.sort(Comparator
+                .comparingInt((String c) -> { int i = savedOrder.indexOf(c); return i < 0 ? Integer.MAX_VALUE : i; })
+                .thenComparing(Comparator.naturalOrder()));
+        for (String folder : folders) {
+            List<UserNewsService.FeedRef> catFeeds = byFolder.get(folder);
+            int catCount = catFeeds.stream()
                     .mapToInt(r -> countByFeed.getOrDefault(r.title(), 0L).intValue()).sum();
-            FeedNode.Category cat = new FeedNode.Category(e.getKey(), catCount);
+            FeedNode.Category cat = new FeedNode.Category(folder, catCount);
             feedData.addItem(null, cat);
-            for (UserNewsService.FeedRef r : e.getValue()) { // already in saved position order
-                feedData.addItem(cat, new FeedNode.Feed(r.title(), e.getKey(),
+            for (UserNewsService.FeedRef r : catFeeds) { // already in saved position order
+                feedData.addItem(cat, new FeedNode.Feed(r.title(), folder,
                         countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId(),
                         r.url(), r.authUsername()));
             }
@@ -340,33 +348,40 @@ public class HeadlinesView extends Div {
     }
 
     /**
-     * Mouse drag-and-drop reordering of the feeds tree, like RSSOwl's BookMarkExplorer. Only channels
-     * (Feed nodes) are draggable; category folders and saved-search folders stay put. Dropping a
+     * Mouse drag-and-drop reordering of the feeds tree, like RSSOwl's BookMarkExplorer. Channels
+     * (Feed nodes) and category folders are draggable; saved-search folders stay put. Dropping a
      * channel reorders it among its siblings, drops it <em>into</em> a folder (drop on top of one), or
-     * pops it back out to the top level — depending on where you release.
+     * pops it back out to the top level; dropping a folder reorders it among the other folders. All
+     * moves are persisted per user.
      */
     private void enableFeedDragAndDrop() {
         feedTree.setRowsDraggable(true);
-        feedTree.setDragFilter(n -> n instanceof FeedNode.Feed);
+        feedTree.setDragFilter(n -> n instanceof FeedNode.Feed || n instanceof FeedNode.Category);
         // Set the drop mode once, up front, rather than inside dragStart: a per-drag setDropMode
         // only reaches the client after a server round-trip, which can make the first drop after
         // grab flaky. It has no visible effect except while a drag is actually in progress.
         feedTree.setDropMode(GridDropMode.ON_TOP_OR_BETWEEN);
 
-        feedTree.addDragStartListener(e -> {
-            FeedNode n = e.getDraggedItems().get(0);
-            draggedFeed = (n instanceof FeedNode.Feed f) ? f : null;
-        });
-        feedTree.addDragEndListener(e -> draggedFeed = null);
+        feedTree.addDragStartListener(e -> draggedNode = e.getDraggedItems().get(0));
+        feedTree.addDragEndListener(e -> draggedNode = null);
         feedTree.addDropListener(e -> {
             FeedNode target = e.getDropTargetItem().orElse(null);
-            if (draggedFeed == null || target == null || target.equals(draggedFeed)) {
+            if (draggedNode == null || target == null || target.equals(draggedNode)) {
                 return;
             }
-            moveFeed(draggedFeed, target, e.getDropLocation());
-            persistFeedOrder(draggedFeed); // save the new folder + order for this user
+            GridDropLocation loc = e.getDropLocation();
+            if (draggedNode instanceof FeedNode.Feed df) {
+                moveFeed(df, target, loc);
+                persistFeedOrder(df); // save the new folder + order for this user
+            } else if (draggedNode instanceof FeedNode.Category dc) {
+                if (!(target instanceof FeedNode.Category)) {
+                    return; // folders reorder only among other folders
+                }
+                placeRelative(dc, null, target, loc == GridDropLocation.ABOVE ? loc : GridDropLocation.BELOW);
+                persistFolderOrder();
+            }
             feedDataProvider.refreshAll();
-            feedTree.select(draggedFeed); // keep the moved channel selected, like RSSOwl
+            feedTree.select(draggedNode); // keep the moved row selected, like RSSOwl
         });
     }
 
@@ -379,6 +394,15 @@ public class HeadlinesView extends Div {
                 .map(n -> ((FeedNode.Feed) n).subscriptionId())
                 .toList();
         news.reorderFolder(subject, folder, orderedIds);
+    }
+
+    /** Persist the new category-folder order for this user (root-level Category nodes, in order). */
+    private void persistFolderOrder() {
+        List<String> orderedNames = feedData.getChildren(null).stream()
+                .filter(n -> n instanceof FeedNode.Category)
+                .map(n -> ((FeedNode.Category) n).name())
+                .toList();
+        news.reorderFolders(subject, orderedNames);
     }
 
     /** Re-parents/reorders {@code dragged} relative to {@code target} for the given drop location. */
@@ -402,7 +426,7 @@ public class HeadlinesView extends Div {
     }
 
     /** Positions {@code dragged} immediately above/below {@code target} among {@code parent}'s children. */
-    private void placeRelative(FeedNode.Feed dragged, FeedNode parent, FeedNode target, GridDropLocation loc) {
+    private void placeRelative(FeedNode dragged, FeedNode parent, FeedNode target, GridDropLocation loc) {
         if (loc != GridDropLocation.ABOVE) {
             feedData.moveAfterSibling(dragged, target);
         } else {

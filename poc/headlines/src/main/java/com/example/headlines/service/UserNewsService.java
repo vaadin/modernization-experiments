@@ -51,13 +51,16 @@ public class UserNewsService {
     private final ArticleRepository articles;
     private final SubscriptionRepository subscriptions;
     private final ArticleStateRepository states;
+    private final com.example.headlines.data.FolderPrefRepository folderPrefs;
 
     public UserNewsService(FeedRepository feeds, ArticleRepository articles,
-            SubscriptionRepository subscriptions, ArticleStateRepository states) {
+            SubscriptionRepository subscriptions, ArticleStateRepository states,
+            com.example.headlines.data.FolderPrefRepository folderPrefs) {
         this.feeds = feeds;
         this.articles = articles;
         this.subscriptions = subscriptions;
         this.states = states;
+        this.folderPrefs = folderPrefs;
     }
 
     /** First-login bootstrap: give a brand-new user the default subscription set (from feeds.opml). */
@@ -134,6 +137,33 @@ public class UserNewsService {
     }
 
     // --- subscription mutations (feeds tree: reorder / move folder / add / remove) ---
+
+    /** The user's saved folder order (category names by position); empty if they never reordered. */
+    @Transactional(readOnly = true)
+    public List<String> folderOrder(String subject) {
+        return folderPrefs.findByOwnerOrderByPositionAsc(subject).stream()
+                .map(com.example.headlines.data.FolderPref::getName)
+                .toList();
+    }
+
+    /** Persist a drag-and-drop result for category folders: the given names, in this order. */
+    @Transactional
+    public void reorderFolders(String subject, List<String> orderedFolderNames) {
+        Map<String, com.example.headlines.data.FolderPref> mine =
+                folderPrefs.findByOwnerOrderByPositionAsc(subject).stream()
+                        .collect(Collectors.toMap(com.example.headlines.data.FolderPref::getName,
+                                Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        int pos = 0;
+        for (String name : orderedFolderNames) {
+            com.example.headlines.data.FolderPref pref = mine.get(name);
+            if (pref == null) {
+                folderPrefs.save(new com.example.headlines.data.FolderPref(subject, name, pos++));
+            } else {
+                pref.setPosition(pos++);
+                folderPrefs.save(pref);
+            }
+        }
+    }
 
     /** Persist a drag-and-drop result: the given subscriptions, in order, now live in {@code folder}. */
     @Transactional
