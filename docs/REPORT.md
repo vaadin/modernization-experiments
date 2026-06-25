@@ -732,6 +732,23 @@ _(This section is the point of the experiment and grows as we go.)_
   false. The durable argument for moving to the web is **reach and zero-install distribution**,
   not a dead toolkit — and overstating the toolkit's death would have been a credibility-losing
   mistake we caught by actually building it.
+- **The SWT/JFace UI plumbing collapses dramatically in Vaadin — but mind the scope caveat.** Concrete
+  before/after, measured with `cloc` (Java code lines, comments/blanks excluded):
+  - **Sorting:** RSSOwl's `NewsComparator` is **306 code lines** (500 with header/comments). The
+    Vaadin equivalent is **5 `setComparator(...)` one-liners** on the columns (status/title/author/
+    feed/date) plus a small shared `rowCmp` helper — call it **~10 lines**.
+  - **Owner-draw rendering** (bold-unread, sticky highlight, label colour): RSSOwl's
+    `NewsTableLabelProvider` is **467 code lines**; the equivalent visual effects are **~10 lines of
+    CSS** (`::part(unread){font-weight}`, `::part(sticky){background}`) plus a touch of inline style
+    in a `Grid` renderer.
+  - For context, the JFace viewer plumbing around them is large too — `NewsContentProvider` 1,505
+    lines, `NewsTableControl` 1,225 — versus a declarative `TreeGrid` with column definitions.
+  This is the single strongest pro-Vaadin data point: the imperative SWT/JFace ceremony (comparators,
+  content/label providers, owner-draw paint) becomes declarative `Grid` config + CSS. **Honest
+  caveat:** part of the shrink is *reduced scope* — RSSOwl's `NewsComparator` also handles
+  group-aware sorting, multiple secondary keys, news-bins and `EntityGroup` cases our slice doesn't;
+  a fully faithful port would be larger than 10 lines. But even allowing for that, the order-of-
+  magnitude compression of the UI-plumbing layer is real and repeatable.
 - **The migration target is well-defined and credible** — a genuine master-detail with a
   sortable table, not a toy.
 - **The job is "migrate an RCP app," not "migrate SWT widgets."** RSSOwl is full Eclipse RCP
