@@ -665,6 +665,18 @@ Honest findings from this slice:
   rather than by automation — a real right-click works for a user. A genuine limitation of the test
   harness, not the app.
 
+**Per-feed authentication** (parity with RSSOwl's per-bookmark credentials). Feeds can require a
+login: each `Subscription` carries optional username/password; the fetcher sends HTTP Basic auth and,
+on a 401, raises `AuthenticationRequiredException` (parsing the `WWW-Authenticate` realm) so the UI
+prompts "Feed requires authentication". Credentials are set in the Add-feed dialog or a "Set
+credentials…" context item; authenticated feeds show a 🔒. Verified against `httpbin.org/basic-auth`:
+no credentials → 401 → the auth-failed prompt; correct credentials → the request is accepted (the
+header works; httpbin's JSON then fails RSS parsing, as expected). One honest multi-user nuance:
+`Feed`/`Article` are *shared* across users, so the shared background refresh uses the first
+credentialed subscriber's credentials — fine for a single owner per private feed, but a fully correct
+multi-tenant design would fetch auth-gated feeds per-subscriber. Credentials are stored in plain
+columns in the PoC; a real deployment would encrypt them / use a secret store.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_
