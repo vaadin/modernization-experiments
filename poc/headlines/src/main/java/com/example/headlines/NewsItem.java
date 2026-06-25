@@ -34,7 +34,7 @@ public class NewsItem {
     private final LocalDateTime date; // may be null -> sorts last, like RSSOwl
     private State state;
     private boolean sticky;
-    private final String labelColor; // CSS hex like "#1565c0", or null for none
+    private String labelColor; // CSS hex like "#1565c0", or null for none; user-assignable
     private final String link;
     private final boolean attachments; // RSS enclosure present -> "News with Attachments"
 
@@ -84,6 +84,11 @@ public class NewsItem {
 
     public void toggleSticky() {
         sticky = !sticky;
+    }
+
+    /** Assign or clear (null) this item's user label colour. */
+    public void setLabelColor(String labelColor) {
+        this.labelColor = labelColor;
     }
 
     /** Status sort rank, mirroring RSSOwl's NEW &gt; UPDATED &gt; UNREAD &gt; READ priority. */

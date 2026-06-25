@@ -32,6 +32,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -88,6 +89,19 @@ class UserNewsServiceTest {
 
         assertFalse(svc.newsItems(ALICE).get(0).unread(), "alice marked it read");
         assertTrue(svc.newsItems(BOB).get(0).unread(), "bob is unaffected (isolated state)");
+    }
+
+    @Test
+    void labelIsPerUserAndExposedOnNewsItem() {
+        Feed f = feeds.save(new Feed("https://feed", "F", null));
+        Article a = articles.save(new Article(f, null, "https://x/1", "Item", "a", LocalDateTime.now(), false));
+        subscriptions.save(new Subscription(ALICE, f, null, 0));
+        subscriptions.save(new Subscription(BOB, f, null, 0));
+
+        svc.setLabel(ALICE, a.getId(), "#c62828");
+
+        assertEquals("#c62828", svc.newsItems(ALICE).get(0).labelColor());
+        assertNull(svc.newsItems(BOB).get(0).labelColor(), "bob sees no label (isolated)");
     }
 
     @Test

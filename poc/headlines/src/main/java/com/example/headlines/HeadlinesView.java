@@ -82,8 +82,14 @@ public class HeadlinesView extends Div {
             {"News with Attachments", "attachments"}, {"Sticky News", "sticky"},
             {"Labeled News", "labeled"}};
 
+    /** RSSOwl's default labels: {name, CSS colour}. Assigned per-article via the context menu. */
+    private static final String[][] LABELS = {
+            {"Important", "#c62828"}, {"Work", "#1565c0"}, {"Personal", "#2e7d32"},
+            {"To Do", "#ef6c00"}, {"Later", "#6a1b9a"}};
+
     private List<NewsItem> allItems; // reloaded after add/unsubscribe
-    private List<NewsItem> currentItems;
+    private List<NewsItem> currentItems; // the feed/folder/smart-folder selection
+    private String searchTerm = "";      // live headline filter (empty = no filter)
     private GroupBy currentGroupBy = GroupBy.NONE;
 
     private final TreeGrid<FeedNode> feedTree = new TreeGrid<>();
@@ -448,13 +454,24 @@ public class HeadlinesView extends Div {
             applyGrouping(currentGroupBy);
         });
 
+        // Live headline search (title / author / feed), narrowing the current selection.
+        TextField search = new TextField();
+        search.setPlaceholder("Search headlines…");
+        search.setClearButtonVisible(true);
+        search.setValueChangeMode(com.vaadin.flow.data.value.ValueChangeMode.LAZY);
+        search.setPrefixComponent(VaadinIcon.SEARCH.create());
+        search.addValueChangeListener(e -> {
+            searchTerm = e.getValue() == null ? "" : e.getValue().trim();
+            applyGrouping(currentGroupBy);
+        });
+
         // Signed-in identity + logout (multi-user: proves whose data this is).
         Span who = new Span("Signed in as " + displayName);
         who.getStyle().set("align-self", "center").set("color", "var(--vaadin-text-color-secondary, #666)");
         Button logout = new Button("Log out", e -> authContext.logout());
         logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
 
-        HorizontalLayout bar = new HorizontalLayout(groupBy, who, logout);
+        HorizontalLayout bar = new HorizontalLayout(groupBy, search, who, logout);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
         bar.setFlexGrow(1, who); // push logout to the right
@@ -525,11 +542,12 @@ public class HeadlinesView extends Div {
     private void applyGrouping(GroupBy by) {
         children.clear();
         List<Row> roots = new ArrayList<>();
+        List<NewsItem> items = displayedItems(); // feed selection narrowed by the search box
         if (by == GroupBy.NONE) {
-            for (NewsItem n : currentItems) roots.add(new Row.ItemRow(n));
+            for (NewsItem n : items) roots.add(new Row.ItemRow(n));
             headlines.setItems(roots, r -> List.of());
         } else {
-            for (Bucket b : Grouping.group(currentItems, by)) {
+            for (Bucket b : Grouping.group(items, by)) {
                 Row.GroupRow g = new Row.GroupRow(b.key(), b.label(), b.colorHint(),
                         b.orderIndex(), b.items().size());
                 List<Row> kids = new ArrayList<>();
@@ -580,12 +598,30 @@ public class HeadlinesView extends Div {
         menu.addSeparator();
         GridMenuItem<Row> read = menu.addItem("Mark read", e -> e.getItem().ifPresent(this::toggleReadAndRefresh));
         GridMenuItem<Row> sticky = menu.addItem("Make sticky", e -> e.getItem().ifPresent(this::toggleStickyAndRefresh));
+
+        // Label submenu (RSSOwl: assign a coloured label to a news item).
+        GridMenuItem<Row> label = menu.addItem("Label");
+        for (String[] lbl : LABELS) {
+            String color = lbl[1];
+            label.getSubMenu().addItem(lbl[0], e -> e.getItem().ifPresent(r -> applyLabel(r, color)));
+        }
+        label.getSubMenu().addItem("Remove label", e -> e.getItem().ifPresent(r -> applyLabel(r, null)));
+
         menu.setDynamicContentHandler(row -> {
             if (!(row instanceof Row.ItemRow ir)) return false; // no menu on group rows
             read.setText(ir.news().unread() ? "Mark read" : "Mark unread");
             sticky.setText(ir.news().sticky() ? "Remove sticky" : "Make sticky");
             return true;
         });
+    }
+
+    /** Assign (or clear, when {@code color} is null) a user label on the row's item, persisted per user. */
+    private void applyLabel(Row row, String color) {
+        if (row instanceof Row.ItemRow ir) {
+            ir.news().setLabelColor(color);
+            news.setLabel(subject, ir.news().id(), color);
+            headlines.getDataProvider().refreshItem(ir);
+        }
     }
 
     // --- cell components ---
@@ -665,8 +701,7 @@ public class HeadlinesView extends Div {
         return row.filter(r -> r instanceof Row.ItemRow).map(r -> ((Row.ItemRow) r).news());
     }
 
-    /** Predicate behind a saved-search smart folder. "labeled" is a stub (the PoC has no user-label
-     *  feature — the colours are per-category, not user labels), so it stays empty, honestly. */
+    /** Predicate behind a saved-search smart folder. */
     private java.util.function.Predicate<NewsItem> savedPredicate(String key) {
         return switch (key) {
             case "unread" -> NewsItem::unread;
@@ -674,8 +709,23 @@ public class HeadlinesView extends Div {
                     && n.date().toLocalDate().equals(java.time.LocalDate.now());
             case "attachments" -> NewsItem::attachments;
             case "sticky" -> NewsItem::sticky;
-            default -> n -> false; // "labeled" — no user labels in the PoC
+            case "labeled" -> n -> n.labelColor() != null; // user-assigned a label
+            default -> n -> false;
         };
+    }
+
+    /** The items currently shown: the feed/folder selection, narrowed by the search box (if any). */
+    private List<NewsItem> displayedItems() {
+        if (searchTerm.isBlank()) {
+            return currentItems;
+        }
+        String q = searchTerm.toLowerCase();
+        return currentItems.stream().filter(n -> contains(n.title(), q)
+                || contains(n.author(), q) || contains(n.feed(), q)).toList();
+    }
+
+    private static boolean contains(String s, String lowerQuery) {
+        return s != null && s.toLowerCase().contains(lowerQuery);
     }
 
     private Comparator<Row> rowCmp(Comparator<NewsItem> itemCmp) {
