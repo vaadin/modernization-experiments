@@ -49,8 +49,10 @@ public class Subscription {
     private String titleOverride; // optional per-user rename; falls back to feed title
 
     // Per-feed HTTP authentication (like RSSOwl's per-bookmark credentials), stored per user.
-    // PoC: stored as-is; a real deployment would encrypt at rest / use a secret store.
+    // The password is encrypted at rest via CredentialCipher (AES-256-GCM).
     private String authUsername;
+
+    @jakarta.persistence.Convert(converter = CredentialCipher.class)
     private String authPassword;
 
     protected Subscription() { }
