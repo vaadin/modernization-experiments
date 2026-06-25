@@ -671,11 +671,20 @@ on a 401, raises `AuthenticationRequiredException` (parsing the `WWW-Authenticat
 prompts "Feed requires authentication". Credentials are set in the Add-feed dialog or a "Set
 credentials…" context item; authenticated feeds show a 🔒. Verified against `httpbin.org/basic-auth`:
 no credentials → 401 → the auth-failed prompt; correct credentials → the request is accepted (the
-header works; httpbin's JSON then fails RSS parsing, as expected). One honest multi-user nuance:
-`Feed`/`Article` are *shared* across users, so the shared background refresh uses the first
-credentialed subscriber's credentials — fine for a single owner per private feed, but a fully correct
-multi-tenant design would fetch auth-gated feeds per-subscriber. Credentials are stored in plain
-columns in the PoC; a real deployment would encrypt them / use a secret store.
+header works; httpbin's JSON then fails RSS parsing, as expected).
+
+**Per-user isolation of authenticated feeds — a security fix caught in review** ("No way is it
+acceptable to share feed credentials between users"). The first cut fetched auth-gated feeds in the
+*shared* background refresh using one subscriber's stored credentials, into the shared article pool —
+leaking both the credentials (used on others' behalf) and the private content they unlock. Corrected:
+the shared refresh now fetches every feed **anonymously** (never with stored credentials), so
+auth-gated feeds 401 there and are skipped; `Article` gained an `owner` (null = public/shared, else
+the Keycloak subject) with `(feed, link, owner)` uniqueness; authenticated feeds are fetched **per
+user with their own credentials** and stored private to that subject; a user's headlines are public
+articles **plus only their own** private ones. Verified end-to-end with a local Basic-auth RSS server:
+alice (with credentials) sees the feed's items, stored `owner = alice` in the DB; bob — same URL,
+*no* credentials — sees the feed with **0** articles and **none** of alice's content. (Credentials are
+still stored in plain columns in the PoC; a real deployment would encrypt them / use a secret store.)
 
 ## Honest findings so far
 
