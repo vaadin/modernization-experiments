@@ -224,7 +224,11 @@ public class HeadlinesView extends Div {
             String t = title.getValue().isBlank() ? u : title.getValue().trim();
             news.addSubscription(subject, u, t, folder.getValue().trim(), user.getValue(), pass.getValue());
             try {
-                feedFetch.refreshByUrl(u, user.getValue().trim(), pass.getValue()); // fetch now
+                if (user.getValue().isBlank()) {
+                    feedFetch.refreshPublic(u);                                  // anonymous, shared
+                } else {
+                    feedFetch.refreshForUser(u, subject, user.getValue().trim(), pass.getValue()); // private to this user
+                }
             } catch (AuthenticationRequiredException auth) {
                 pass.setInvalid(true);
                 pass.setErrorMessage("Authentication failed (401) — check username/password");
@@ -257,7 +261,11 @@ public class HeadlinesView extends Div {
         Button save = new Button("Save", e -> {
             news.setCredentials(subject, feed.subscriptionId(), user.getValue(), pass.getValue());
             try {
-                feedFetch.refreshByUrl(feed.url(), user.getValue().trim(), pass.getValue());
+                if (user.getValue().isBlank()) {
+                    feedFetch.refreshPublic(feed.url());                         // cleared creds -> anonymous
+                } else {
+                    feedFetch.refreshForUser(feed.url(), subject, user.getValue().trim(), pass.getValue());
+                }
             } catch (AuthenticationRequiredException auth) {
                 pass.setInvalid(true);
                 pass.setErrorMessage("Authentication failed (401) — check username/password");

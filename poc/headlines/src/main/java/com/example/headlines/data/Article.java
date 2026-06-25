@@ -25,12 +25,18 @@ import java.time.LocalDateTime;
 
 /**
  * A single article from a {@link Feed}. Global and shared: fetched once per feed, deduplicated by
- * (feed, link). Per-user read/sticky/label state lives separately in {@link ArticleState}.
+ * (feed, link, owner). Per-user read/sticky/label state lives separately in {@link ArticleState}.
+ *
+ * <p><b>Owner scoping (security):</b> {@code owner == null} is a <em>public</em> article fetched
+ * anonymously by the shared refresh — visible to everyone. {@code owner == <subject>} is a
+ * <em>private</em> article fetched with that user's own credentials from an authenticated feed —
+ * visible only to them. A user's credentials are NEVER used to fetch on anyone else's behalf, and the
+ * private content they unlock is never placed in the shared pool.
  */
 @Entity
 @Table(name = "article",
-        uniqueConstraints = @UniqueConstraint(columnNames = {"feed_id", "link"}),
-        indexes = @Index(columnList = "feed_id"))
+        uniqueConstraints = @UniqueConstraint(columnNames = {"feed_id", "link", "owner"}),
+        indexes = @Index(columnList = "feed_id, owner"))
 public class Article {
 
     @Id
@@ -43,6 +49,9 @@ public class Article {
     @Column(nullable = false, length = 2048)
     private String link;
 
+    /** null = public (anonymous shared fetch); else the Keycloak subject who owns this private copy. */
+    private String owner;
+
     @Column(length = 1024)
     private String title;
 
@@ -54,9 +63,10 @@ public class Article {
 
     protected Article() { }
 
-    public Article(Feed feed, String link, String title, String author,
+    public Article(Feed feed, String owner, String link, String title, String author,
             LocalDateTime publishedDate, boolean attachments) {
         this.feed = feed;
+        this.owner = owner;
         this.link = link;
         this.title = title;
         this.author = author;
@@ -66,6 +76,7 @@ public class Article {
 
     public Long getId() { return id; }
     public Feed getFeed() { return feed; }
+    public String getOwner() { return owner; }
     public String getLink() { return link; }
     public String getTitle() { return title; }
     public String getAuthor() { return author; }

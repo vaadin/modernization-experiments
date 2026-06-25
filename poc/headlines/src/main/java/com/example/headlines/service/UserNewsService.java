@@ -91,7 +91,11 @@ public class UserNewsService {
         for (Subscription sub : subs) {
             String folder = (sub.getFolder() == null || sub.getFolder().isBlank())
                     ? "Uncategorized" : sub.getFolder();
-            for (Article a : articles.findByFeed(sub.getFeed())) {
+            // The articles this user may see for the feed: public ones + their own private copies.
+            // Never another user's private articles.
+            List<Article> visible = new ArrayList<>(articles.findByFeedAndOwnerIsNull(sub.getFeed()));
+            visible.addAll(articles.findByFeedAndOwner(sub.getFeed(), subject));
+            for (Article a : visible) {
                 ArticleState st = stateByArticle.get(a.getId());
                 boolean read = st != null && st.isRead();
                 boolean sticky = st != null && st.isSticky();

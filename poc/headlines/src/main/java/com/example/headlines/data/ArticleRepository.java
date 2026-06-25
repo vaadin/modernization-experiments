@@ -16,7 +16,11 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ArticleRepository extends JpaRepository<Article, Long> {
-    Optional<Article> findByFeedAndLink(Feed feed, String link);
-    List<Article> findByFeed(Feed feed);
-    long countByFeed(Feed feed);
+    // Dedup lookups, owner-aware (public = owner null; private = a user's subject).
+    Optional<Article> findByFeedAndLinkAndOwnerIsNull(Feed feed, String link);
+    Optional<Article> findByFeedAndLinkAndOwner(Feed feed, String link, String owner);
+
+    // The articles a user may see for a feed: public ones plus their own private copies.
+    List<Article> findByFeedAndOwnerIsNull(Feed feed);
+    List<Article> findByFeedAndOwner(Feed feed, String owner);
 }
