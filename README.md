@@ -107,3 +107,13 @@ screenshots are in [`docs/before/`](docs/before/) and [`docs/after/`](docs/after
 > — clone your app, build it from source to confirm it still runs, map the slice's JFace viewers to
 > Vaadin `Grid`/`TreeGrid`, and **query the Vaadin MCP server for current APIs** rather than relying
 > on an AI model's training data (see the report's "Working method" section for why).
+
+## License
+
+This project is licensed under the **Eclipse Public License v1.0** (EPL-1.0) — see
+[`LICENSE`](LICENSE). EPL-1.0 matches the original RSSOwl / RSSOwlnix license, so RSSOwl logic can be
+ported into this experiment cleanly (with attribution) if exact fidelity is desired.
+
+The Vaadin code is an independent re-implementation that shares no source with RSSOwl; what is derived
+is structural and factual (the feed taxonomy, a few constants). See [`NOTICE`](NOTICE) for attribution
+and third-party dependency licenses.
