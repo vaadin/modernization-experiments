@@ -308,15 +308,28 @@ migrating versus the whole codebase (cloc, Java code lines only, in the RSSOwlni
 | Scope | Java code lines |
 |---|---|
 | Whole RSSOwl(nix) project | 121,261 |
+| — of which **tests** (`org.rssowl.core.tests`) | 35,406 |
+| — of which **production** code | **85,855** |
 | `org.rssowl.ui` (the UI bundle) | 57,334 |
 | `org.rssowl.core` (model/persistence/feed logic) | 28,521 |
 | The master-detail slice (the 15 tree/table/reader files) | 9,000 |
 | The headline table proper (6 files incl. `NewsComparator`) | 1,980 |
 
-So the slice is ~7% of the project; the headline table at its center is ~2k lines. That ~2k lines
-is what the design below sizes at **~13–18 person-days** to faithfully re-create in Vaadin — a
-useful ratio when extrapolating to a full app: the visible widget is small, but its behavior
-(sorting, owner-draw, interactive cells, context menu, selection wiring) is dense.
+**A fair objection (raised in review): "how can this tiny app be 121k lines?"** Two things the
+headline number hides. First, **~29% of it (35,406 lines) is test code** — production Java is
+**~85,855 lines**. Second, that figure is what this 20-year-old **full Eclipse RCP** app already
+*contains*, not what the product *needs*. The user-facing product is genuinely small (a feed
+reader), but RCP RSSOwl ships its own infrastructure: object-database integration (db4o), full-text
+search (Lucene), feed parsing (JDOM), an embedded browser, OPML import/export, a notification-popup
+system, retention/cleanup, labels & stickies, saved searches, sync, and preferences — spread across
+~167 OSGi bundles. (The bundled libraries db4o/Lucene/JDOM/HttpClient are JARs, so they add **0**
+source lines here.) The UX is small; the machinery is not.
+
+And that gap is the point. The slice we actually migrate is ~7% of the project; the headline table
+at its center is ~2k lines — and *nobody rewrites 121k lines*. That ~2k lines is what the design
+below sizes at **~13–18 person-days** to faithfully re-create in Vaadin — a useful ratio when
+extrapolating: the visible widget is small, but its behavior (sorting, owner-draw, interactive
+cells, context menu, selection wiring) is dense.
 
 ## Working method: the model's Vaadin knowledge is stale — query the MCP server
 
