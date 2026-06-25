@@ -100,6 +100,39 @@ class UserNewsServiceTest {
     }
 
     @Test
+    void ensureSeededGivesNewUserTheDefaultSubscriptions() {
+        // Seed the global Feed table from the bundled defaults, then seed alice from them.
+        var defaults = DefaultFeeds.read();
+        defaults.forEach(s -> feeds.save(new Feed(s.url(), s.title(), s.category())));
+
+        svc.ensureSeeded(ALICE);
+        int afterFirst = svc.feedRefs(ALICE).size();
+        svc.ensureSeeded(ALICE); // idempotent — must not double-subscribe
+
+        assertEquals(defaults.size(), afterFirst, "one subscription per default feed");
+        assertEquals(afterFirst, svc.feedRefs(ALICE).size(), "ensureSeeded is idempotent");
+    }
+
+    @Test
+    void addAndRemoveSubscription() {
+        svc.addSubscription(ALICE, "https://new/feed", "New Feed", "News", null, null);
+        assertEquals(1, svc.feedRefs(ALICE).size());
+
+        long subId = svc.feedRefs(ALICE).get(0).subscriptionId();
+        svc.removeSubscription(ALICE, subId);
+        assertTrue(svc.feedRefs(ALICE).isEmpty(), "unsubscribed");
+    }
+
+    @Test
+    void removeSubscriptionIsScopedToOwner() {
+        Feed f = feeds.save(new Feed("https://f", "F", null));
+        Subscription bobs = subscriptions.save(new Subscription(BOB, f, null, 0));
+        // alice must not be able to remove bob's subscription
+        svc.removeSubscription(ALICE, bobs.getId());
+        assertEquals(1, svc.feedRefs(BOB).size(), "bob's subscription survives alice's call");
+    }
+
+    @Test
     void reorderFolderPersistsOrderAndFolder() {
         Feed f1 = feeds.save(new Feed("https://a", "A", null));
         Feed f2 = feeds.save(new Feed("https://b", "B", null));
