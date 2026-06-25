@@ -692,14 +692,25 @@ per-user channel order — both survive logout/restart.
 
 **Where the slice stands vs the original (asked directly: "no gap any more?").** No — not feature
 complete, and this report won't pretend otherwise. The targeted slice is faithful (three-pane feeds
-tree → sortable/groupable headlines → reader, with read/sticky/labels-stub, retention cap, smart
-folders, drag-reorder of channels *and* folders, add/unsubscribe, per-feed auth) and we added what
-the desktop app lacks (multi-user, Keycloak SSO, per-user isolation, zero-install web). But RSSOwl
-the *application* still has whole subsystems we deliberately didn't build: full-text (Lucene) search,
-embedded-browser article rendering, label management, news filters/actions, notifications, OPML
-import/export UI, scheduled per-feed refresh, column persistence, keyboard navigation, news bins, and
-sync. Faithful on the slice; a fraction of the whole app — exactly the honest scope this experiment
-set out to measure.
+tree → sortable/groupable headlines → reader, with read/sticky, **per-user labels**, **headline
+search**, retention cap, smart folders, drag-reorder of channels *and* folders, add/unsubscribe,
+per-feed auth) and we added what the desktop app lacks (multi-user, Keycloak SSO, per-user isolation,
+zero-install web). But RSSOwl the *application* still has whole subsystems we deliberately didn't
+build: **full-text (Lucene) search** with saved-search criteria (ours is a live substring filter over
+the loaded headlines, not an index), embedded-browser article rendering, news filters/actions,
+notifications, OPML import/export UI, scheduled per-feed refresh, column persistence, keyboard
+navigation, news bins, and sync. Labels are a basic single-colour-per-item subset (no label CRUD /
+multi-label). Faithful on the slice; a fraction of the whole app — exactly the honest scope this
+experiment set out to measure.
+
+**A clarification worth recording (it was nearly mis-stated as a finding).** RSSOwl is *not* "mostly
+SWT scaffolding" — SWT isn't even in its 121k lines (it's an external Eclipse dependency); its own
+code is the UI bundle + model + ~29% tests, and the hard part is the **RCP/JFace** layer, not the SWT
+widgets. The accurate, related observation is that the SWT/JFace **UI plumbing is verbose and
+collapses sharply in Vaadin**: the ~500-line `NewsComparator` became a handful of `setComparator(...)`
+one-liners, owner-draw rendering became a little CSS, and JFace content/label-provider ceremony
+disappears into `Grid` renderers. That compression is real and quotable — but it's about the JFace
+boilerplate shrinking, not the application being "mostly scaffolding."
 
 ## Honest findings so far
 
