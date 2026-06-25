@@ -70,11 +70,6 @@ public class HeadlinesView extends Div {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
-    /** Big outlets shown as loose top-level channels too (they also live in folders), like RSSOwl.
-     *  Names must match the feed titles in feeds.opml. */
-    private static final java.util.Set<String> FEATURED = java.util.Set.of(
-            "BBC News", "NYT — Home", "Guardian World", "TechCrunch", "Wired");
-
     /** RSSOwl's default saved-search smart folders: {display name, predicate key}. */
     private static final String[][] SAVED = {
             {"Unread News", "unread"}, {"Today's News", "today"},
@@ -146,38 +141,8 @@ public class HeadlinesView extends Div {
         feedTree.setSizeFull();
         feedTree.addThemeVariants(GridVariant.LUMO_COMPACT, GridVariant.LUMO_NO_BORDER);
 
-        // Split into category folders and ungrouped top-level channels (category "Uncategorized"),
-        // mirroring RSSOwl's default_feeds.xml: folders + loose channels beside them.
-        Map<String, List<NewsItem>> byCat = new TreeMap<>(); // alphabetical -> Business first
-        List<NewsItem> ungrouped = new ArrayList<>();
-        for (NewsItem n : allItems) {
-            if ("Uncategorized".equals(n.category())) ungrouped.add(n);
-            else byCat.computeIfAbsent(n.category(), k -> new ArrayList<>()).add(n);
-        }
-        // Mutable hierarchy so channels can be dragged around (see enableFeedDragAndDrop()).
-        feedData = new TreeData<>();
-        for (var e : byCat.entrySet()) {
-            FeedNode.Category catNode = new FeedNode.Category(e.getKey(), e.getValue().size());
-            feedData.addItem(null, catNode);
-            Map<String, Long> byFeed = e.getValue().stream()
-                    .collect(Collectors.groupingBy(NewsItem::feed, TreeMap::new, Collectors.counting()));
-            byFeed.forEach((feed, count) ->
-                    feedData.addItem(catNode, new FeedNode.Feed(feed, e.getKey(), count.intValue())));
-        }
-        // Top-level channels = genuinely ungrouped feeds + a few "featured" big outlets that ALSO
-        // live in folders (RSSOwl lists e.g. BBC News both inside a folder and as a loose channel).
-        Map<String, Long> topLevel = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-        ungrouped.forEach(n -> topLevel.merge(n.feed(), 1L, Long::sum));
-        allItems.stream().filter(n -> FEATURED.contains(n.feed()))
-                .forEach(n -> topLevel.merge(n.feed(), 1L, Long::sum));
-        topLevel.forEach((feed, count) ->
-                feedData.addItem(null, new FeedNode.Feed(feed, "Uncategorized", count.intValue())));
-
-        // Saved-search smart folders at the bottom (RSSOwl: Unread/Today/Attachments/Sticky/Labeled).
-        for (String[] s : SAVED) {
-            int c = (int) allItems.stream().filter(savedPredicate(s[1])).count();
-            feedData.addItem(null, new FeedNode.Saved(s[0], s[1], c));
-        }
+        // Build the tree from the user's persisted subscriptions (folder + drag order).
+        buildFeedTreeData();
 
         // FLATTENED keeps scroll/expansion stable across refreshAll() after a drag (see Vaadin docs).
         feedDataProvider = new TreeDataProvider<>(feedData, HierarchyFormat.FLATTENED);
@@ -200,6 +165,43 @@ public class HeadlinesView extends Div {
             }
             applyGrouping(currentGroupBy);
         });
+    }
+
+    /**
+     * (Re)builds the tree's {@link TreeData} from the current user's persisted {@code Subscription}s:
+     * category folders (alphabetical) with their feeds in saved drag order, then top-level ungrouped
+     * channels, then the saved-search smart folders. Article counts come from the loaded headlines.
+     */
+    private void buildFeedTreeData() {
+        feedData = new TreeData<>();
+        Map<String, Long> countByFeed = allItems.stream()
+                .collect(Collectors.groupingBy(NewsItem::feed, Collectors.counting()));
+
+        List<UserNewsService.FeedRef> refs = news.feedRefs(subject); // folder asc, position asc
+        Map<String, List<UserNewsService.FeedRef>> byFolder = new TreeMap<>(); // categories, alphabetical
+        List<UserNewsService.FeedRef> topLevel = new ArrayList<>();
+        for (UserNewsService.FeedRef r : refs) {
+            if (r.folder() == null || r.folder().isBlank()) topLevel.add(r);
+            else byFolder.computeIfAbsent(r.folder(), k -> new ArrayList<>()).add(r);
+        }
+        for (var e : byFolder.entrySet()) {
+            int catCount = e.getValue().stream()
+                    .mapToInt(r -> countByFeed.getOrDefault(r.title(), 0L).intValue()).sum();
+            FeedNode.Category cat = new FeedNode.Category(e.getKey(), catCount);
+            feedData.addItem(null, cat);
+            for (UserNewsService.FeedRef r : e.getValue()) { // already in saved position order
+                feedData.addItem(cat, new FeedNode.Feed(r.title(), e.getKey(),
+                        countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId()));
+            }
+        }
+        for (UserNewsService.FeedRef r : topLevel) {
+            feedData.addItem(null, new FeedNode.Feed(r.title(), "Uncategorized",
+                    countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId()));
+        }
+        for (String[] s : SAVED) {
+            int c = (int) allItems.stream().filter(savedPredicate(s[1])).count();
+            feedData.addItem(null, new FeedNode.Saved(s[0], s[1], c));
+        }
     }
 
     /**
@@ -227,9 +229,21 @@ public class HeadlinesView extends Div {
                 return;
             }
             moveFeed(draggedFeed, target, e.getDropLocation());
+            persistFeedOrder(draggedFeed); // save the new folder + order for this user
             feedDataProvider.refreshAll();
             feedTree.select(draggedFeed); // keep the moved channel selected, like RSSOwl
         });
+    }
+
+    /** Persist the destination folder's new order (and the moved feed's folder) for this user. */
+    private void persistFeedOrder(FeedNode.Feed moved) {
+        FeedNode parent = feedData.getParent(moved); // null => top-level channel
+        String folder = (parent instanceof FeedNode.Category c) ? c.name() : null;
+        List<Long> orderedIds = feedData.getChildren(parent).stream()
+                .filter(n -> n instanceof FeedNode.Feed)
+                .map(n -> ((FeedNode.Feed) n).subscriptionId())
+                .toList();
+        news.reorderFolder(subject, folder, orderedIds);
     }
 
     /** Re-parents/reorders {@code dragged} relative to {@code target} for the given drop location. */

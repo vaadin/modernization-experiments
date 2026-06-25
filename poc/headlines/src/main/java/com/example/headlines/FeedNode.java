@@ -23,7 +23,9 @@ public sealed interface FeedNode permits FeedNode.Category, FeedNode.Feed, FeedN
         @Override public String label() { return name + "  (" + count + ")"; }
     }
 
-    record Feed(String name, String category, int count) implements FeedNode {
+    /** {@code subscriptionId} ties the node to its persisted {@code Subscription} so drag-and-drop
+     *  reordering can be saved per user. */
+    record Feed(String name, String category, int count, long subscriptionId) implements FeedNode {
         @Override public String label() { return name + "  (" + count + ")"; }
     }
 
