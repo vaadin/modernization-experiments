@@ -683,8 +683,23 @@ the Keycloak subject) with `(feed, link, owner)` uniqueness; authenticated feeds
 user with their own credentials** and stored private to that subject; a user's headlines are public
 articles **plus only their own** private ones. Verified end-to-end with a local Basic-auth RSS server:
 alice (with credentials) sees the feed's items, stored `owner = alice` in the DB; bob — same URL,
-*no* credentials — sees the feed with **0** articles and **none** of alice's content. (Credentials are
-still stored in plain columns in the PoC; a real deployment would encrypt them / use a secret store.)
+*no* credentials — sees the feed with **0** articles and **none** of alice's content.
+
+Credentials are **encrypted at rest** (AES-256-GCM via a JPA `AttributeConverter`, key from
+`APP_CREDENTIAL_KEY`), not stored in clear text. And **folder reordering is persisted per user** too:
+category folders are draggable (a `FolderPref` entity stores their order), alongside the existing
+per-user channel order — both survive logout/restart.
+
+**Where the slice stands vs the original (asked directly: "no gap any more?").** No — not feature
+complete, and this report won't pretend otherwise. The targeted slice is faithful (three-pane feeds
+tree → sortable/groupable headlines → reader, with read/sticky/labels-stub, retention cap, smart
+folders, drag-reorder of channels *and* folders, add/unsubscribe, per-feed auth) and we added what
+the desktop app lacks (multi-user, Keycloak SSO, per-user isolation, zero-install web). But RSSOwl
+the *application* still has whole subsystems we deliberately didn't build: full-text (Lucene) search,
+embedded-browser article rendering, label management, news filters/actions, notifications, OPML
+import/export UI, scheduled per-feed refresh, column persistence, keyboard navigation, news bins, and
+sync. Faithful on the slice; a fraction of the whole app — exactly the honest scope this experiment
+set out to measure.
 
 ## Honest findings so far
 
