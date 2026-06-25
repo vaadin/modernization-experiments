@@ -113,6 +113,17 @@ public class FeedFetchService {
         }
     }
 
+    /** Fetch + persist a single feed now — used when a user subscribes to a new feed. */
+    public void refreshByUrl(String url) {
+        feeds.findByUrl(url).ifPresent(f -> {
+            try {
+                persist(f, fetchRaw(f));
+            } catch (Exception e) {
+                log.warn("Fetch failed for {}: {}", url, e.toString());
+            }
+        });
+    }
+
     private List<Raw> fetchRaw(Feed f) throws Exception {
         HttpRequest req = HttpRequest.newBuilder(URI.create(f.getUrl()))
                 .timeout(PER_FEED_TIMEOUT)

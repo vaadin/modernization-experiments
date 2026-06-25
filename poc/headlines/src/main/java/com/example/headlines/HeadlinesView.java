@@ -20,6 +20,9 @@ import com.vaadin.flow.component.grid.GridSortOrder;
 import com.vaadin.flow.component.grid.GridVariant;
 import com.vaadin.flow.component.grid.contextmenu.GridContextMenu;
 import com.vaadin.flow.component.grid.contextmenu.GridMenuItem;
+import com.vaadin.flow.component.dialog.Dialog;
+import com.vaadin.flow.component.notification.Notification;
+import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.component.grid.dnd.GridDropLocation;
 import com.vaadin.flow.component.grid.dnd.GridDropMode;
 import com.vaadin.flow.data.provider.hierarchy.HierarchicalDataProvider.HierarchyFormat;
@@ -43,6 +46,7 @@ import com.vaadin.flow.router.Route;
 import com.vaadin.flow.signals.Signal;
 import com.vaadin.flow.signals.local.ValueSignal;
 import com.vaadin.flow.spring.security.AuthenticationContext;
+import com.example.headlines.service.FeedFetchService;
 import com.example.headlines.service.UserNewsService;
 import jakarta.annotation.security.PermitAll;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
@@ -76,7 +80,7 @@ public class HeadlinesView extends Div {
             {"News with Attachments", "attachments"}, {"Sticky News", "sticky"},
             {"Labeled News", "labeled"}};
 
-    private final List<NewsItem> allItems;
+    private List<NewsItem> allItems; // reloaded after add/unsubscribe
     private List<NewsItem> currentItems;
     private GroupBy currentGroupBy = GroupBy.NONE;
 
@@ -90,12 +94,14 @@ public class HeadlinesView extends Div {
     private com.vaadin.flow.component.grid.Grid.Column<Row> dateColumn;
 
     private final UserNewsService news;
+    private final FeedFetchService feedFetch;
     private final AuthenticationContext authContext;
     private final String subject;      // Keycloak subject — the per-user key
     private final String displayName;  // for the header
 
-    public HeadlinesView(UserNewsService news, AuthenticationContext authContext) {
+    public HeadlinesView(UserNewsService news, FeedFetchService feedFetch, AuthenticationContext authContext) {
         this.news = news;
+        this.feedFetch = feedFetch;
         this.authContext = authContext;
         OidcUser user = authContext.getAuthenticatedUser(OidcUser.class)
                 .orElseThrow(() -> new IllegalStateException("No authenticated user"));
@@ -127,8 +133,19 @@ public class HeadlinesView extends Div {
         right.setSplitterPosition(60);
         right.setSizeFull();
 
-        // left feeds tree | right (headlines / reader)
-        SplitLayout outer = new SplitLayout(feedTree, right);
+        // left pane: an "Add feed" bar above the feeds tree
+        Button addFeed = new Button("Add feed", VaadinIcon.PLUS.create(), e -> openAddFeedDialog());
+        addFeed.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+        HorizontalLayout feedBar = new HorizontalLayout(addFeed);
+        feedBar.getStyle().set("padding", "0.3rem 0.5rem");
+        VerticalLayout leftPane = new VerticalLayout(feedBar, feedTree);
+        leftPane.setSizeFull();
+        leftPane.setPadding(false);
+        leftPane.setSpacing(false);
+        leftPane.setFlexGrow(1, feedTree);
+
+        // left feeds pane | right (headlines / reader)
+        SplitLayout outer = new SplitLayout(leftPane, right);
         outer.setOrientation(SplitLayout.Orientation.HORIZONTAL);
         outer.setSplitterPosition(20);
         outer.setSizeFull();
@@ -165,6 +182,62 @@ public class HeadlinesView extends Div {
             }
             applyGrouping(currentGroupBy);
         });
+
+        // Right-click a channel to unsubscribe (RSSOwl: "Delete" on a bookmark). Feeds only.
+        GridContextMenu<FeedNode> feedMenu = feedTree.addContextMenu();
+        feedMenu.addItem("Unsubscribe", e -> e.getItem().ifPresent(this::unsubscribe));
+        feedMenu.setDynamicContentHandler(node -> node instanceof FeedNode.Feed);
+    }
+
+    private void openAddFeedDialog() {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle("Add feed");
+        TextField url = new TextField("Feed URL");
+        url.setWidthFull();
+        url.setPlaceholder("https://example.com/rss");
+        TextField title = new TextField("Title (optional)");
+        title.setWidthFull();
+        TextField folder = new TextField("Folder (optional)");
+        folder.setWidthFull();
+        VerticalLayout form = new VerticalLayout(url, title, folder);
+        form.setPadding(false);
+        dialog.add(form);
+
+        Button add = new Button("Add", e -> {
+            String u = url.getValue() == null ? "" : url.getValue().trim();
+            if (u.isEmpty()) {
+                url.setInvalid(true);
+                url.setErrorMessage("A feed URL is required");
+                return;
+            }
+            String t = title.getValue().isBlank() ? u : title.getValue().trim();
+            news.addSubscription(subject, u, t, folder.getValue().trim());
+            feedFetch.refreshByUrl(u); // pull its articles now so it isn't empty
+            reloadUserData();
+            dialog.close();
+            Notification.show("Subscribed to " + t);
+        });
+        add.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), add);
+        dialog.open();
+    }
+
+    private void unsubscribe(FeedNode node) {
+        if (node instanceof FeedNode.Feed f) {
+            news.removeSubscription(subject, f.subscriptionId());
+            reloadUserData();
+            Notification.show("Unsubscribed from " + f.name());
+        }
+    }
+
+    /** Re-query the current user's data and rebuild the tree + grid (after add/unsubscribe). */
+    private void reloadUserData() {
+        this.allItems = news.newsItems(subject);
+        buildFeedTreeData();
+        feedDataProvider = new TreeDataProvider<>(feedData, HierarchyFormat.FLATTENED);
+        feedTree.setDataProvider(feedDataProvider);
+        this.currentItems = allItems;
+        applyGrouping(currentGroupBy);
     }
 
     /**
