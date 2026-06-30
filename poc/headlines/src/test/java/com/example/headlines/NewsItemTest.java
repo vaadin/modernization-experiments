@@ -56,6 +56,22 @@ class NewsItemTest {
     }
 
     @Test
+    void setReadAndSetStickyAreExplicitAndIdempotent() {
+        NewsItem n = withState(State.UNREAD);
+        n.setRead(true);
+        assertFalse(n.unread(), "explicitly marked read");
+        n.setRead(true); // idempotent — bulk actions may set the same state repeatedly
+        assertFalse(n.unread());
+        n.setRead(false);
+        assertTrue(n.unread(), "explicitly marked unread");
+
+        n.setSticky(true);
+        assertTrue(n.sticky());
+        n.setSticky(false);
+        assertFalse(n.sticky());
+    }
+
+    @Test
     void statusRankOrdersNewBeforeUpdatedBeforeUnreadBeforeRead() {
         assertTrue(withState(State.NEW).statusRank() < withState(State.UPDATED).statusRank());
         assertTrue(withState(State.UPDATED).statusRank() < withState(State.UNREAD).statusRank());

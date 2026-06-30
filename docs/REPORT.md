@@ -745,6 +745,39 @@ Honest findings from this slice:
   the harness can't synthesise them. A human dragging a header sees it persist; Playwright can't perform
   that drag.
 
+### Day 5 — multi-select + auto-mark-read (two more stretch items, two real gotchas)
+
+Closed two more of the open stretch items, and both surfaced genuine Vaadin findings worth recording.
+
+**Multi-select.** Switched the headlines grid to `SelectionMode.MULTI` so several headlines can be
+selected and acted on at once (mark read/unread, sticky, label) — like RSSOwl's news table. Context-menu
+actions now operate on the whole selection when the right-clicked row is part of it (else just that row),
+and the menu labels show the count, e.g. *"Mark read (12)"*. New `setRead`/`setSticky` setters on
+`NewsItem` back the bulk path; a browserless test asserts the grid uses `GridMultiSelectionModel`.
+
+- **Gotcha — in MULTI mode a row-body click no longer selects (only the checkbox does).** That silently
+  broke the master-detail flow: clicking a headline stopped opening it in the reader (verified:
+  `selectedItems = 0`, reader empty after a row click). The fix is to **decouple reading from selecting** —
+  wire the reader (and the auto-read timer) to `addItemClickListener`, and let the checkbox column drive
+  the multi-selection that bulk actions read via `getSelectedItems()`. Clicking reads; checking selects.
+
+**Auto-mark-read.** RSSOwl marks the displayed article read after a short delay; a toolbar checkbox
+("Mark read after viewing", on by default) gates it. On selection the view arms a 2-second task on a
+shared daemon scheduler; when it fires it marks the item read **only if it's still the shown item and
+still unread** (so skipping quickly past headlines doesn't mark them). The result reaches the browser via
+`@Push` + `ui.access`. A detach listener cancels any pending task.
+
+- **Gotcha — `Signal.get()` throws outside a reactive context (Vaadin 25 Signals).** The first cut read
+  the current article with `selected.get()` inside the `ui.access` callback and got
+  `IllegalStateException: Signal.get() was called outside a reactive context`. `get()` sets up dependency
+  tracking and is only legal inside a `Signal.effect`/computed; from a plain callback (the timer, a
+  checkbox listener) you must use **`selected.peek()`** (or `Signal.untracked(...)`). This is the *second*
+  distinct Signals-API surprise in this experiment (the first was the listener-vs-Signals design itself) —
+  reinforcing that the model's pre-25 Signals knowledge is unreliable and the running app is what catches it.
+- **Verified end-to-end:** clicking a headline opened it in the reader (proving the item-click rewire), and
+  ~2s later its row toggle flipped from "Mark read" to "Mark unread" via push — confirmed in the browser
+  after the `peek()` fix; the server log went from a stack trace per fire to clean.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_
@@ -829,5 +862,8 @@ _(This section is the point of the experiment and grows as we go.)_
       `TreeGrid` (None/Date/Status/Author/Category/Feed/Sticky) — done; see "Deepening" above.
 - [x] **Column persistence** (per-user order / width / visibility, restored on load) — done; see
       "Day 4" above. `ColumnPref` entity + reorder/resize/visibility wiring; 34 tests green.
-- [ ] Stretch (still beyond the timebox): multi-select, auto-mark-read timer, direction-aware null
-      sorting; then re-measure effort.
+- [x] **Multi-select** (bulk mark-read/sticky/label over a checkbox selection; reader decoupled to
+      item-click) — done; see "Day 5".
+- [x] **Auto-mark-read timer** (mark the displayed article read after 2s, via `@Push`) — done; see
+      "Day 5". Surfaced the `Signal.peek()`-vs-`get()` rule.
+- [ ] Stretch (still beyond the timebox): direction-aware null sorting; then re-measure effort.

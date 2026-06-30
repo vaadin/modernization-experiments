@@ -82,8 +82,18 @@ public class NewsItem {
         state = unread() ? State.READ : State.UNREAD;
     }
 
+    /** Set the read state explicitly (used by multi-select bulk actions and the auto-mark-read timer). */
+    public void setRead(boolean read) {
+        state = read ? State.READ : State.UNREAD;
+    }
+
     public void toggleSticky() {
         sticky = !sticky;
+    }
+
+    /** Set the sticky flag explicitly (used by multi-select bulk actions). */
+    public void setSticky(boolean sticky) {
+        this.sticky = sticky;
     }
 
     /** Assign or clear (null) this item's user label colour. */

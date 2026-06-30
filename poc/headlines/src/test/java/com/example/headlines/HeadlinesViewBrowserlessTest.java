@@ -78,5 +78,10 @@ class HeadlinesViewBrowserlessTest extends BrowserlessTest {
         var buttonTexts = $(Button.class).all().stream().map(Button::getText).toList();
         assertTrue(buttonTexts.contains("Add feed"), "Add feed button present");
         assertTrue(buttonTexts.contains("Log out"), "Log out button present");
+
+        // the headlines grid is multi-select (RSSOwl's news table allows bulk selection)
+        boolean anyMulti = $(TreeGrid.class).all().stream()
+                .anyMatch(g -> g.getSelectionModel() instanceof com.vaadin.flow.component.grid.GridMultiSelectionModel);
+        assertTrue(anyMulti, "headlines grid uses multi-select");
     }
 }

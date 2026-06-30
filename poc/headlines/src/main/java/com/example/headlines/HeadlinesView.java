@@ -16,6 +16,7 @@ import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
+import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.grid.Grid;
 import com.vaadin.flow.component.grid.GridSortOrder;
 import com.vaadin.flow.component.grid.GridVariant;
@@ -65,6 +66,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -106,6 +108,18 @@ public class HeadlinesView extends Div {
     private final Map<Row.GroupRow, List<Row>> children = new HashMap<>();
     private Grid.Column<Row> dateColumn;
     private List<Grid.Column<Row>> columnOrder; // current left-to-right order, for persistence
+
+    // Auto-mark-read: RSSOwl marks the displayed article read after a short delay. A single shared
+    // daemon scheduler runs the delay off the UI thread; @Push (see Application) carries the update back.
+    private static final long AUTO_READ_DELAY_MS = 2000;
+    private static final java.util.concurrent.ScheduledExecutorService AUTO_READ_SCHEDULER =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "auto-mark-read");
+                t.setDaemon(true);
+                return t;
+            });
+    private java.util.concurrent.ScheduledFuture<?> pendingAutoRead;
+    private boolean autoReadEnabled = true;
 
     private final UserNewsService news;
     private final FeedFetchService feedFetch;
@@ -165,6 +179,11 @@ public class HeadlinesView extends Div {
         outer.setSplitterPosition(20);
         outer.setSizeFull();
         add(outer);
+
+        // Don't let a queued auto-mark-read fire after the user navigates away / the UI is gone.
+        addDetachListener(e -> {
+            if (pendingAutoRead != null) pendingAutoRead.cancel(false);
+        });
     }
 
     // --- left pane: feeds navigation tree (RSSOwl's BookMarkExplorer) ---
@@ -480,13 +499,23 @@ public class HeadlinesView extends Div {
         addColumnToggle(cols, "feed", "Feed");
         addColumnToggle(cols, "date", "Date");
 
+        // Auto-mark-read toggle (RSSOwl marks the displayed article read after a short delay).
+        Checkbox autoRead = new Checkbox("Mark read after viewing");
+        autoRead.setValue(autoReadEnabled);
+        autoRead.getStyle().set("align-self", "center");
+        autoRead.addValueChangeListener(e -> {
+            autoReadEnabled = e.getValue();
+            if (!autoReadEnabled && pendingAutoRead != null) pendingAutoRead.cancel(false);
+            else scheduleAutoMarkRead(selected.peek()); // re-arm; peek() = read signal outside an effect
+        });
+
         // Signed-in identity + logout (multi-user: proves whose data this is).
         Span who = new Span("Signed in as " + displayName);
         who.getStyle().set("align-self", "center").set("color", "var(--vaadin-text-color-secondary, #666)");
         Button logout = new Button("Log out", e -> authContext.logout());
         logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
 
-        HorizontalLayout bar = new HorizontalLayout(groupBy, search, columnsMenu, who, logout);
+        HorizontalLayout bar = new HorizontalLayout(groupBy, search, columnsMenu, autoRead, who, logout);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
         bar.setFlexGrow(1, who); // push logout to the right
@@ -511,7 +540,9 @@ public class HeadlinesView extends Div {
     private void configureHeadlines() {
         headlines.setSizeFull();
         headlines.addThemeVariants(GridVariant.LUMO_ROW_STRIPES, GridVariant.LUMO_NO_BORDER);
-        headlines.setSelectionMode(TreeGrid.SelectionMode.SINGLE);
+        // RSSOwl's news table is multi-select (Ctrl/Shift-click) for bulk actions; the reader shows the
+        // first of the selection. Context-menu actions below operate on the whole selection.
+        headlines.setSelectionMode(TreeGrid.SelectionMode.MULTI);
 
         headlines.addComponentColumn(row -> itemOnly(row, this::stateIcon))
                 .setHeader("").setKey("status").setWidth("46px").setFlexGrow(0)
@@ -556,9 +587,15 @@ public class HeadlinesView extends Div {
             return sb.isEmpty() ? null : sb.toString();
         });
 
-        headlines.addSelectionListener(e -> e.getFirstSelectedItem().ifPresent(row -> {
-            if (row instanceof Row.ItemRow ir) selected.set(ir.news());
-        }));
+        // Click a headline to read it (and arm auto-mark-read). The grid is MULTI-select, where a
+        // row-body click does NOT change selection (only the checkbox column does) — so the reader is
+        // wired to item-click, decoupling "read this one" from "select these for a bulk action".
+        headlines.addItemClickListener(e -> {
+            if (e.getItem() instanceof Row.ItemRow ir) {
+                selected.set(ir.news());
+                scheduleAutoMarkRead(ir.news());
+            }
+        });
         headlines.addItemDoubleClickListener(e -> {
             if (e.getItem() instanceof Row.ItemRow ir) openLink(ir.news());
         });
@@ -674,28 +711,64 @@ public class HeadlinesView extends Div {
         GridContextMenu<Row> menu = headlines.addContextMenu();
         menu.addItem("Open original", e -> itemOf(e.getItem()).ifPresent(this::openLink));
         menu.addSeparator();
-        GridMenuItem<Row> read = menu.addItem("Mark read", e -> e.getItem().ifPresent(this::toggleReadAndRefresh));
-        GridMenuItem<Row> sticky = menu.addItem("Make sticky", e -> e.getItem().ifPresent(this::toggleStickyAndRefresh));
+        // Read/sticky/label act on the whole selection when the right-clicked row is part of it,
+        // otherwise on just that row (RSSOwl applies news actions to the selected set).
+        GridMenuItem<Row> read = menu.addItem("Mark read", e -> e.getItem().ifPresent(r ->
+                markReadBulk(actionTargets(r), r instanceof Row.ItemRow ir && ir.news().unread())));
+        GridMenuItem<Row> sticky = menu.addItem("Make sticky", e -> e.getItem().ifPresent(r ->
+                setStickyBulk(actionTargets(r), !(r instanceof Row.ItemRow ir && ir.news().sticky()))));
 
         // Label submenu (RSSOwl: assign a coloured label to a news item).
         GridMenuItem<Row> label = menu.addItem("Label");
         for (String[] lbl : LABELS) {
             String color = lbl[1];
-            label.getSubMenu().addItem(lbl[0], e -> e.getItem().ifPresent(r -> applyLabel(r, color)));
+            label.getSubMenu().addItem(lbl[0], e -> e.getItem().ifPresent(r -> applyLabelBulk(actionTargets(r), color)));
         }
-        label.getSubMenu().addItem("Remove label", e -> e.getItem().ifPresent(r -> applyLabel(r, null)));
+        label.getSubMenu().addItem("Remove label", e -> e.getItem().ifPresent(r -> applyLabelBulk(actionTargets(r), null)));
 
         menu.setDynamicContentHandler(row -> {
             if (!(row instanceof Row.ItemRow ir)) return false; // no menu on group rows
-            read.setText(ir.news().unread() ? "Mark read" : "Mark unread");
-            sticky.setText(ir.news().sticky() ? "Remove sticky" : "Make sticky");
+            int n = actionTargets(row).size();
+            String suffix = n > 1 ? " (" + n + ")" : ""; // show how many rows the action will affect
+            read.setText((ir.news().unread() ? "Mark read" : "Mark unread") + suffix);
+            sticky.setText((ir.news().sticky() ? "Remove sticky" : "Make sticky") + suffix);
+            label.setText("Label" + suffix);
             return true;
         });
     }
 
-    /** Assign (or clear, when {@code color} is null) a user label on the row's item, persisted per user. */
-    private void applyLabel(Row row, String color) {
-        if (row instanceof Row.ItemRow ir) {
+    /**
+     * The headlines an action applies to: the current multi-selection if the right-clicked row is part
+     * of it (and there's more than one), otherwise just the right-clicked row. Group rows are excluded.
+     */
+    private List<Row.ItemRow> actionTargets(Row clicked) {
+        Set<Row> selectedRows = headlines.getSelectedItems();
+        if (clicked != null && selectedRows.contains(clicked) && selectedRows.size() > 1) {
+            return selectedRows.stream().filter(r -> r instanceof Row.ItemRow)
+                    .map(r -> (Row.ItemRow) r).toList();
+        }
+        return clicked instanceof Row.ItemRow ir ? List.of(ir) : List.of();
+    }
+
+    private void markReadBulk(List<Row.ItemRow> rows, boolean read) {
+        for (Row.ItemRow ir : rows) {
+            ir.news().setRead(read);
+            news.setRead(subject, ir.news().id(), read); // persist per-user
+            headlines.getDataProvider().refreshItem(ir);
+        }
+    }
+
+    private void setStickyBulk(List<Row.ItemRow> rows, boolean sticky) {
+        for (Row.ItemRow ir : rows) {
+            ir.news().setSticky(sticky);
+            news.setSticky(subject, ir.news().id(), sticky); // persist per-user
+            headlines.getDataProvider().refreshItem(ir);
+        }
+    }
+
+    /** Assign (or clear, when {@code color} is null) a user label across the rows, persisted per user. */
+    private void applyLabelBulk(List<Row.ItemRow> rows, String color) {
+        for (Row.ItemRow ir : rows) {
             ir.news().setLabelColor(color);
             news.setLabel(subject, ir.news().id(), color);
             headlines.getDataProvider().refreshItem(ir);
@@ -754,6 +827,32 @@ public class HeadlinesView extends Div {
     }
 
     // --- actions ---
+
+    /**
+     * Arm (or cancel) the auto-mark-read timer for the newly displayed headline. After
+     * {@link #AUTO_READ_DELAY_MS} the item is marked read — but only if it's still the selected item
+     * and still unread, so quickly skipping past articles doesn't mark them. The delay runs off the UI
+     * thread on a shared scheduler; the result is pushed back via {@code @Push} and {@code ui.access}.
+     */
+    private void scheduleAutoMarkRead(NewsItem shown) {
+        if (pendingAutoRead != null) {
+            pendingAutoRead.cancel(false);
+            pendingAutoRead = null;
+        }
+        if (!autoReadEnabled || shown == null || !shown.unread()) return;
+        UI ui = UI.getCurrent();
+        long id = shown.id();
+        pendingAutoRead = AUTO_READ_SCHEDULER.schedule(() -> ui.access(() -> {
+            // peek(), not get(): we're not inside a Signal.effect, so get() would throw
+            // "Signal.get() was called outside a reactive context" (Vaadin 25 Signals rule).
+            NewsItem cur = selected.peek();
+            if (cur != null && cur.id() == id && cur.unread()) {
+                cur.setRead(true);
+                news.setRead(subject, id, true); // persist per-user
+                headlines.getDataProvider().refreshItem(new Row.ItemRow(cur));
+            }
+        }), AUTO_READ_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+    }
 
     private void toggleReadAndRefresh(Row row) {
         if (row instanceof Row.ItemRow ir) {
