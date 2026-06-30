@@ -17,9 +17,14 @@ RSSOwl / RSSOwlnix:
 
 The Vaadin code in poc/headlines/ was written independently against Vaadin Flow
 APIs; it shares no source with RSSOwl. What is derived from RSSOwl is structural
-and factual: the default-feeds taxonomy mirrored in poc/headlines/src/main/
-resources/feeds.opml (with current URLs, not RSSOwl's original list) and a small
-number of behavioral constants (e.g. the 200-items-per-feed retention cap).
+and factual: a small number of behavioral constants (e.g. the 200-items-per-feed
+retention cap).
+
+In addition, poc/headlines/src/main/resources/default_feeds.xml is RSSOwl(nix)'s
+own first-run default-subscriptions OPML, included VERBATIM from RSSOwlnix
+(org.rssowl.ui/default_feeds.xml) under the Eclipse Public License v1.0, so that a
+new user's feed tree mirrors the original application exactly. Its feed URLs are
+RSSOwl's 2009-era list and are mostly defunct.
 
 Should RSSOwl source be ported into this project in the future, the affected
 files will carry the RSSOwl EPL-1.0 copyright header and be credited here.

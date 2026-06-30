@@ -778,6 +778,32 @@ still unread** (so skipping quickly past headlines doesn't mark them). The resul
   ~2s later its row toggle flipped from "Mark read" to "Mark unread" via push — confirmed in the browser
   after the `peek()` fix; the server log went from a stack trace per fire to clean.
 
+### Day 6 — mirroring the original's default tree exactly (nested folders)
+
+To compare side-by-side with the running original, a new user (Alice) is now seeded from **RSSOwl's own
+first-run OPML** — `org.rssowl.ui/default_feeds.xml`, copied verbatim into the PoC (EPL-1.0, attributed in
+`NOTICE`) — instead of our earlier hand-built 51-feed taxonomy with current URLs. That tree is **15
+top-level folders, 16 sub-folders, and 292 feeds**. Verified in the browser: Alice's tree now shows the
+same 15 folders + 12 loose top-level channels + the 5 smart folders, and expanding *Computers* reveals
+*Windows / Linux / Mac / PDA* (then its direct feeds) — the original nesting and OPML order, 1:1.
+
+What this took, and the honest caveats:
+- **The folder model had to grow from flat to nested.** Subscriptions store a folder *path*
+  (`"Computers/Windows"`); the OPML parser walks ancestor `<outline>`s to build it; the tree renderer
+  recurses, interleaving sub-folders and feeds at each level by their OPML position so the order matches
+  the source. No schema change — `folder` was already a free string. Selecting a folder shows its feeds
+  **plus** its sub-folders' (path-prefix match), like the original.
+- **The feeds are RSSOwl's 2009 URLs — most are dead.** This is faithful, not a bug: the original you run
+  today shows the same mostly-empty feeds. So the comparison is **structural** (identical tree) rather
+  than content-for-content. A few 2009 feeds still resolve, so some folders show non-zero counts.
+- **292 mostly-dead feeds would stall startup** on connect timeouts if fetched synchronously, so the
+  initial refresh now runs on a background daemon thread: the app and tree come up immediately (~7s) and
+  counts fill in as feeds resolve. A reusable lesson — *don't block boot on a fan-out of network calls
+  you can do lazily.*
+- **Trade-off accepted:** folder **drag-reorder** is preserved only at the top level (it overrides OPML
+  order there); sub-folders always render in OPML order. Fine for a faithful default view; full
+  nested-reorder persistence wasn't worth the scope.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_

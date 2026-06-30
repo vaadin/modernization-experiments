@@ -70,7 +70,7 @@ public class UserNewsService {
         this.columnPrefs = columnPrefs;
     }
 
-    /** First-login bootstrap: give a brand-new user the default subscription set (from feeds.opml). */
+    /** First-login bootstrap: give a brand-new user the default subscription set (from default_feeds.xml). */
     @Transactional
     public void ensureSeeded(String subject) {
         if (subscriptions.existsByOwner(subject)) return;

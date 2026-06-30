@@ -19,7 +19,10 @@ public sealed interface FeedNode permits FeedNode.Category, FeedNode.Feed, FeedN
 
     String label();
 
-    record Category(String name, int count) implements FeedNode {
+    /** A folder. {@code path} is the full folder path ({@code "Computers/Windows"}) and is the node's
+     *  identity; {@code name} is just the last segment, shown in the tree. Supports nesting so a user's
+     *  tree can mirror the original's nested default folders. */
+    record Category(String path, String name, int count) implements FeedNode {
         @Override public String label() { return name + "  (" + count + ")"; }
     }
 

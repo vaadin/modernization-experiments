@@ -75,7 +75,12 @@ public class FeedFetchService {
     @PostConstruct
     void init() {
         seedFeedsIfEmpty();
-        refreshAll();
+        // The bundled defaults are RSSOwl's 2009 tree — ~292 feeds, most of them long dead. Fetching
+        // them synchronously would stall startup on connect timeouts, so refresh in the background:
+        // the app (and the feeds tree) come up immediately and article counts fill in as feeds resolve.
+        Thread refresh = new Thread(this::refreshAll, "feed-initial-refresh");
+        refresh.setDaemon(true);
+        refresh.start();
     }
 
     @Transactional
@@ -98,7 +103,7 @@ public class FeedFetchService {
     public void refreshAll() {
         List<Feed> all = feeds.findAll();
         if (all.isEmpty()) return;
-        ExecutorService pool = Executors.newFixedThreadPool(Math.min(all.size(), 12));
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(all.size(), 24));
         try {
             List<Future<List<Raw>>> futures = new ArrayList<>();
             for (Feed f : all) futures.add(pool.submit(() -> fetchRaw(f, null, null)));

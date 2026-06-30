@@ -63,11 +63,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
@@ -206,7 +207,10 @@ public class HeadlinesView extends Div {
         feedTree.addSelectionListener(e -> {
             FeedNode sel = e.getFirstSelectedItem().orElse(null);
             if (sel instanceof FeedNode.Category c) {
-                currentItems = allItems.stream().filter(n -> c.name().equals(n.category())).toList();
+                // A folder shows its own feeds plus everything in its sub-folders (path prefix match).
+                String p = c.path();
+                currentItems = allItems.stream().filter(n -> n.category() != null
+                        && (n.category().equals(p) || n.category().startsWith(p + "/"))).toList();
             } else if (sel instanceof FeedNode.Feed f) {
                 currentItems = allItems.stream().filter(n -> f.name().equals(n.feed())).toList();
             } else if (sel instanceof FeedNode.Saved sv) {
@@ -333,50 +337,101 @@ public class HeadlinesView extends Div {
     }
 
     /**
-     * (Re)builds the tree's {@link TreeData} from the current user's persisted {@code Subscription}s:
-     * category folders (in saved drag order, else alphabetical) with their feeds in saved drag order,
-     * then top-level ungrouped channels, then the saved-search smart folders. Article counts come from
-     * the loaded headlines.
+     * (Re)builds the tree's {@link TreeData} from the current user's persisted {@code Subscription}s.
+     * Folders nest to any depth from the subscription's folder <em>path</em> ({@code "Computers/Windows"}),
+     * so the tree mirrors the original's nested defaults. Within each level, sub-folders and feeds are
+     * interleaved in their original OPML order (the subscription's saved position); a user's folder
+     * drag-reorder overrides that at the top level. Loose channels (no folder) sit at the root, then the
+     * saved-search smart folders. Article counts (folders aggregate their descendants') come from the
+     * loaded headlines.
      */
     private void buildFeedTreeData() {
         feedData = new TreeData<>();
         Map<String, Long> countByFeed = allItems.stream()
                 .collect(Collectors.groupingBy(NewsItem::feed, Collectors.counting()));
 
-        List<UserNewsService.FeedRef> refs = news.feedRefs(subject); // folder asc, position asc
-        Map<String, List<UserNewsService.FeedRef>> byFolder = new TreeMap<>(); // alphabetical default
-        List<UserNewsService.FeedRef> topLevel = new ArrayList<>();
-        for (UserNewsService.FeedRef r : refs) {
-            if (r.folder() == null || r.folder().isBlank()) topLevel.add(r);
-            else byFolder.computeIfAbsent(r.folder(), k -> new ArrayList<>()).add(r);
-        }
-        // Order folders by the user's saved drag order; any not saved fall back to alphabetical.
-        List<String> savedOrder = news.folderOrder(subject);
-        List<String> folders = new ArrayList<>(byFolder.keySet());
-        folders.sort(Comparator
-                .comparingInt((String c) -> { int i = savedOrder.indexOf(c); return i < 0 ? Integer.MAX_VALUE : i; })
-                .thenComparing(Comparator.naturalOrder()));
-        for (String folder : folders) {
-            List<UserNewsService.FeedRef> catFeeds = byFolder.get(folder);
-            int catCount = catFeeds.stream()
-                    .mapToInt(r -> countByFeed.getOrDefault(r.title(), 0L).intValue()).sum();
-            FeedNode.Category cat = new FeedNode.Category(folder, catCount);
-            feedData.addItem(null, cat);
-            for (UserNewsService.FeedRef r : catFeeds) { // already in saved position order
-                feedData.addItem(cat, new FeedNode.Feed(r.title(), folder,
-                        countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId(),
-                        r.url(), r.authUsername()));
+        // Feeds in OPML order; each folder records its descendants' total count and earliest position.
+        List<UserNewsService.FeedRef> ordered = new ArrayList<>(news.feedRefs(subject));
+        ordered.sort(Comparator.comparingInt(UserNewsService.FeedRef::position));
+
+        Map<String, List<UserNewsService.FeedRef>> directFeeds = new LinkedHashMap<>(); // path ("" = root) -> feeds
+        Map<String, Integer> countByPath = new HashMap<>(); // folder path -> total items (incl. sub-folders)
+        Map<String, Integer> posByPath = new HashMap<>();    // folder path -> min OPML position (ordering key)
+        Set<String> catPaths = new LinkedHashSet<>();
+        for (UserNewsService.FeedRef r : ordered) {
+            String folder = folderOf(r.folder()); // "" for a loose top-level channel
+            int cnt = countByFeed.getOrDefault(r.title(), 0L).intValue();
+            directFeeds.computeIfAbsent(folder, k -> new ArrayList<>()).add(r);
+            String acc = "";
+            for (String seg : folder.isEmpty() ? new String[0] : folder.split("/")) {
+                acc = acc.isEmpty() ? seg : acc + "/" + seg;
+                catPaths.add(acc);
+                countByPath.merge(acc, cnt, Integer::sum);
+                posByPath.merge(acc, r.position(), Math::min);
             }
         }
-        for (UserNewsService.FeedRef r : topLevel) {
-            feedData.addItem(null, new FeedNode.Feed(r.title(), "Uncategorized",
-                    countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId(),
-                    r.url(), r.authUsername()));
-        }
+
+        List<String> savedOrder = news.folderOrder(subject); // top-level folder drag order, if any
+        addFeedTreeLevel("", null, directFeeds, catPaths, countByPath, posByPath, countByFeed, savedOrder);
+
         for (String[] s : SAVED) {
             int c = (int) allItems.stream().filter(savedPredicate(s[1])).count();
             feedData.addItem(null, new FeedNode.Saved(s[0], s[1], c));
         }
+    }
+
+    /** Adds the sub-folders and feeds directly under {@code parentPath} (root when empty), interleaved
+     *  in OPML order — recursing into each sub-folder. */
+    private void addFeedTreeLevel(String parentPath, FeedNode.Category parentNode,
+            Map<String, List<UserNewsService.FeedRef>> directFeeds, Set<String> catPaths,
+            Map<String, Integer> countByPath, Map<String, Integer> posByPath,
+            Map<String, Long> countByFeed, List<String> savedOrder) {
+        // Combined, position-ordered list of this level's children: sub-folder paths and feed refs.
+        List<Object> children = new ArrayList<>();
+        catPaths.stream().filter(p -> isDirectChild(parentPath, p)).forEach(children::add);
+        children.addAll(directFeeds.getOrDefault(parentPath, List.of()));
+        children.sort(Comparator.comparingInt(c -> levelOrderKey(c, parentPath, posByPath, savedOrder)));
+
+        for (Object child : children) {
+            if (child instanceof String cp) {
+                FeedNode.Category cat = new FeedNode.Category(cp, lastSegment(cp), countByPath.getOrDefault(cp, 0));
+                feedData.addItem(parentNode, cat);
+                addFeedTreeLevel(cp, cat, directFeeds, catPaths, countByPath, posByPath, countByFeed, savedOrder);
+            } else {
+                UserNewsService.FeedRef r = (UserNewsService.FeedRef) child;
+                feedData.addItem(parentNode, new FeedNode.Feed(r.title(),
+                        parentPath.isEmpty() ? "Uncategorized" : parentPath,
+                        countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId(),
+                        r.url(), r.authUsername()));
+            }
+        }
+    }
+
+    /** Ordering key for one child at a level: its OPML position. Top-level folders the user dragged are
+     *  pulled to the front in saved order (negative keys), so folder reordering still wins there. */
+    private static int levelOrderKey(Object child, String parentPath, Map<String, Integer> posByPath,
+            List<String> savedOrder) {
+        if (parentPath.isEmpty() && child instanceof String cp) {
+            int saved = savedOrder.indexOf(cp);
+            if (saved >= 0) return Integer.MIN_VALUE + saved; // dragged top-level folders, in saved order
+        }
+        return child instanceof String cp ? posByPath.getOrDefault(cp, Integer.MAX_VALUE)
+                : ((UserNewsService.FeedRef) child).position();
+    }
+
+    /** True when {@code path} is an immediate child folder of {@code parentPath} ({@code ""} = root). */
+    private static boolean isDirectChild(String parentPath, String path) {
+        if (parentPath.isEmpty()) return !path.contains("/");
+        return path.startsWith(parentPath + "/") && path.indexOf('/', parentPath.length() + 1) < 0;
+    }
+
+    private static String lastSegment(String path) {
+        return path.substring(path.lastIndexOf('/') + 1);
+    }
+
+    /** Normalise a stored folder to a path: null/blank/"Uncategorized" become "" (a root-level channel). */
+    private static String folderOf(String folder) {
+        return (folder == null || folder.isBlank() || "Uncategorized".equals(folder)) ? "" : folder;
     }
 
     /**
@@ -420,7 +475,7 @@ public class HeadlinesView extends Div {
     /** Persist the destination folder's new order (and the moved feed's folder) for this user. */
     private void persistFeedOrder(FeedNode.Feed moved) {
         FeedNode parent = feedData.getParent(moved); // null => top-level channel
-        String folder = (parent instanceof FeedNode.Category c) ? c.name() : null;
+        String folder = (parent instanceof FeedNode.Category c) ? c.path() : null;
         List<Long> orderedIds = feedData.getChildren(parent).stream()
                 .filter(n -> n instanceof FeedNode.Feed)
                 .map(n -> ((FeedNode.Feed) n).subscriptionId())
@@ -430,11 +485,11 @@ public class HeadlinesView extends Div {
 
     /** Persist the new category-folder order for this user (root-level Category nodes, in order). */
     private void persistFolderOrder() {
-        List<String> orderedNames = feedData.getChildren(null).stream()
+        List<String> orderedPaths = feedData.getChildren(null).stream()
                 .filter(n -> n instanceof FeedNode.Category)
-                .map(n -> ((FeedNode.Category) n).name())
+                .map(n -> ((FeedNode.Category) n).path())
                 .toList();
-        news.reorderFolders(subject, orderedNames);
+        news.reorderFolders(subject, orderedPaths);
     }
 
     /** Re-parents/reorders {@code dragged} relative to {@code target} for the given drop location. */
