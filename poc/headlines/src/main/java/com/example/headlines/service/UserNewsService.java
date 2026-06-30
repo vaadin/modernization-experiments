@@ -65,7 +65,13 @@ public class UserNewsService {
     private final com.example.headlines.data.ColumnPrefRepository columnPrefs;
     private final com.example.headlines.data.UserStateRepository userStates;
     private final com.example.headlines.data.NewsFilterRepository newsFilters;
+    private final com.example.headlines.data.LabelRepository labelRepo;
     private final ArticleSearch articleSearch;
+
+    /** RSSOwl's default labels (name, colour), seeded per user on first use. */
+    private static final String[][] DEFAULT_LABELS = {
+            {"Important", "#c62828"}, {"Work", "#1565c0"}, {"Personal", "#2e7d32"},
+            {"To Do", "#ef6c00"}, {"Later", "#6a1b9a"}};
 
     public UserNewsService(FeedRepository feeds, ArticleRepository articles,
             SubscriptionRepository subscriptions, ArticleStateRepository states,
@@ -73,6 +79,7 @@ public class UserNewsService {
             com.example.headlines.data.ColumnPrefRepository columnPrefs,
             com.example.headlines.data.UserStateRepository userStates,
             com.example.headlines.data.NewsFilterRepository newsFilters,
+            com.example.headlines.data.LabelRepository labelRepo,
             ArticleSearch articleSearch) {
         this.feeds = feeds;
         this.articles = articles;
@@ -82,7 +89,57 @@ public class UserNewsService {
         this.columnPrefs = columnPrefs;
         this.userStates = userStates;
         this.newsFilters = newsFilters;
+        this.labelRepo = labelRepo;
         this.articleSearch = articleSearch;
+    }
+
+    // --- labels (RSSOwl's manageable labels: per-user CRUD, multi-label per item) ---
+
+    /** Ensure the user has their label set, seeding RSSOwl's five defaults on first use. Returns them. */
+    @Transactional
+    public List<com.example.headlines.data.Label> ensureLabels(String subject) {
+        if (!labelRepo.existsByOwner(subject)) {
+            int pos = 0;
+            for (String[] l : DEFAULT_LABELS) labelRepo.save(new com.example.headlines.data.Label(subject, l[0], l[1], pos++));
+        }
+        return labelRepo.findByOwnerOrderByPositionAsc(subject);
+    }
+
+    /** The user's labels as detached refs (id, name, colour), in order. */
+    @Transactional(readOnly = true)
+    public List<NewsItem.LabelRef> labels(String subject) {
+        return labelRepo.findByOwnerOrderByPositionAsc(subject).stream()
+                .map(l -> new NewsItem.LabelRef(l.getId(), l.getName(), l.getColor())).toList();
+    }
+
+    @Transactional
+    public long createLabel(String subject, String name, String color) {
+        int pos = labelRepo.findByOwnerOrderByPositionAsc(subject).size();
+        return labelRepo.save(new com.example.headlines.data.Label(subject, name, color, pos)).getId();
+    }
+
+    @Transactional
+    public void updateLabel(String subject, long labelId, String name, String color) {
+        labelRepo.findById(labelId).filter(l -> l.getOwner().equals(subject)).ifPresent(l -> {
+            l.setName(name); l.setColor(color); labelRepo.save(l);
+        });
+    }
+
+    /** Delete a label and remove it from every article it was assigned to (for this user). */
+    @Transactional
+    public void deleteLabel(String subject, long labelId) {
+        labelRepo.findById(labelId).filter(l -> l.getOwner().equals(subject)).ifPresent(l -> {
+            for (ArticleState st : states.findByOwner(subject)) {
+                if (st.getLabelIds().remove(labelId)) states.save(st);
+            }
+            labelRepo.delete(l);
+        });
+    }
+
+    /** Set the full label set on one article for the user (multi-label), persisted per user. */
+    @Transactional
+    public void setLabels(String subject, long articleId, java.util.Set<Long> labelIds) {
+        upsert(subject, articleId, st -> st.setLabelIds(new java.util.LinkedHashSet<>(labelIds)));
     }
 
     /** When the user last opened the app (null on their first visit). */
@@ -128,6 +185,7 @@ public class UserNewsService {
         List<Subscription> subs = subscriptions.findByOwnerOrderByFolderAscPositionAsc(subject);
         Map<Long, ArticleState> stateByArticle = states.findByOwner(subject).stream()
                 .collect(Collectors.toMap(st -> st.getArticle().getId(), Function.identity(), (a, b) -> a));
+        List<com.example.headlines.data.Label> userLabels = labelRepo.findByOwnerOrderByPositionAsc(subject);
         List<NewsItem> out = new ArrayList<>();
         for (Subscription sub : subs) {
             String folder = (sub.getFolder() == null || sub.getFolder().isBlank())
@@ -140,13 +198,26 @@ public class UserNewsService {
                 ArticleState st = stateByArticle.get(a.getId());
                 boolean read = st != null && st.isRead();
                 boolean sticky = st != null && st.isSticky();
-                String label = st != null ? st.getLabelColor() : null;
                 NewsItem item = new NewsItem(a.getId(), a.getTitle(), a.getAuthor(), folder, sub.displayTitle(),
-                        a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, label,
+                        a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, null,
                         a.getLink(), a.isAttachments());
                 item.setContent(a.getContent());
+                item.setLabels(resolveLabels(st, userLabels));
                 out.add(item);
             }
+        }
+        return out;
+    }
+
+    /** Map an article state's label ids to display refs, in the user's label order, dropping any that
+     *  no longer exist. */
+    private static List<NewsItem.LabelRef> resolveLabels(ArticleState st,
+            List<com.example.headlines.data.Label> userLabels) {
+        if (st == null || st.getLabelIds().isEmpty()) return List.of();
+        java.util.Set<Long> ids = st.getLabelIds();
+        List<NewsItem.LabelRef> out = new ArrayList<>();
+        for (com.example.headlines.data.Label l : userLabels) {
+            if (ids.contains(l.getId())) out.add(new NewsItem.LabelRef(l.getId(), l.getName(), l.getColor()));
         }
         return out;
     }
@@ -166,6 +237,7 @@ public class UserNewsService {
                 .collect(Collectors.toMap(st -> st.getArticle().getId(), Function.identity(), (a, b) -> a));
         Map<Long, Article> byId = articles.findAllById(ranked).stream()
                 .collect(Collectors.toMap(Article::getId, Function.identity(), (a, b) -> a));
+        List<com.example.headlines.data.Label> userLabels = labelRepo.findByOwnerOrderByPositionAsc(subject);
 
         List<NewsItem> out = new ArrayList<>();
         for (Long id : ranked) { // keep Lucene relevance order
@@ -176,13 +248,13 @@ public class UserNewsService {
             ArticleState st = stateByArticle.get(id);
             boolean read = st != null && st.isRead();
             boolean sticky = st != null && st.isSticky();
-            String label = st != null ? st.getLabelColor() : null;
             String cat = a.getFeed().getDefaultCategory();
             NewsItem item = new NewsItem(a.getId(), a.getTitle(), a.getAuthor(),
                     (cat == null || cat.isBlank()) ? "Uncategorized" : cat, a.getFeed().getTitle(),
-                    a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, label,
+                    a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, null,
                     a.getLink(), a.isAttachments());
             item.setContent(a.getContent());
+            item.setLabels(resolveLabels(st, userLabels));
             out.add(item);
         }
         return out;
@@ -250,8 +322,18 @@ public class UserNewsService {
                     } else if ("MARK_STICKY".equals(action) && !item.sticky()) {
                         setSticky(subject, item.id(), true); applied++;
                     } else if (action.startsWith("LABEL:")) {
-                        String color = action.substring("LABEL:".length());
-                        if (!color.equals(item.labelColor())) { setLabel(subject, item.id(), color); applied++; }
+                        // Action stores a label id; add it if not already on the item (additive).
+                        try {
+                            long labelId = Long.parseLong(action.substring("LABEL:".length()));
+                            boolean has = item.labels().stream().anyMatch(l -> l.id() == labelId);
+                            if (!has) {
+                                java.util.Set<Long> ids = new java.util.LinkedHashSet<>();
+                                item.labels().forEach(l -> ids.add(l.id()));
+                                ids.add(labelId);
+                                setLabels(subject, item.id(), ids);
+                                applied++;
+                            }
+                        } catch (NumberFormatException ignored) { /* legacy/garbled action */ }
                     }
                 }
             }
@@ -269,11 +351,6 @@ public class UserNewsService {
     @Transactional
     public void setSticky(String subject, long articleId, boolean sticky) {
         upsert(subject, articleId, st -> st.setSticky(sticky));
-    }
-
-    @Transactional
-    public void setLabel(String subject, long articleId, String labelColor) {
-        upsert(subject, articleId, st -> st.setLabelColor(labelColor));
     }
 
     private void upsert(String subject, long articleId, java.util.function.Consumer<ArticleState> mutator) {

@@ -39,11 +39,6 @@ import java.util.List;
  */
 public class FiltersDialog extends Dialog {
 
-    /** RSSOwl's default labels (name → colour); reused for the "assign label" action. */
-    private static final String[][] LABELS = {
-            {"Important", "#c62828"}, {"Work", "#1565c0"}, {"Personal", "#2e7d32"},
-            {"To Do", "#ef6c00"}, {"Later", "#6a1b9a"}};
-
     private final UserNewsService news;
     private final String subject;
     private final Runnable onChanged;
@@ -100,14 +95,14 @@ public class FiltersDialog extends Dialog {
         }
     }
 
-    private static String summary(FilterDef f) {
+    private String summary(FilterDef f) {
         String conds = f.conditions().stream()
                 .map(c -> c.getField().name().toLowerCase() + " contains \"" + c.getValue() + "\"")
                 .reduce((a, b) -> a + (f.matchMode() == MatchMode.ALL ? " AND " : " OR ") + b).orElse("(no conditions)");
         return conds + " → " + (f.actions().isEmpty() ? "(no actions)" : String.join(", ", actionLabels(f.actions())));
     }
 
-    private static List<String> actionLabels(List<String> actions) {
+    private List<String> actionLabels(List<String> actions) {
         List<String> out = new ArrayList<>();
         for (String a : actions) {
             if ("MARK_READ".equals(a)) out.add("mark read");
@@ -117,9 +112,15 @@ public class FiltersDialog extends Dialog {
         return out;
     }
 
-    private static String labelName(String color) {
-        for (String[] l : LABELS) if (l[1].equals(color)) return l[0];
-        return color;
+    /** Resolve a "LABEL:<id>" action's id to the label's current name (for the summary line). */
+    private String labelName(String idStr) {
+        try {
+            long id = Long.parseLong(idStr);
+            return news.labels(subject).stream().filter(l -> l.id() == id).findFirst()
+                    .map(NewsItem.LabelRef::name).orElse("(deleted)");
+        } catch (NumberFormatException e) {
+            return idStr;
+        }
     }
 
     /** Open the add/edit editor for {@code existing} (null = new filter). */
@@ -154,9 +155,10 @@ public class FiltersDialog extends Dialog {
         Checkbox markSticky = new Checkbox("Make sticky");
         Select<String> label = new Select<>();
         label.setLabel("Assign label");
+        List<NewsItem.LabelRef> userLabels = news.labels(subject);
         List<String> labelNames = new ArrayList<>();
         labelNames.add("(none)");
-        for (String[] l : LABELS) labelNames.add(l[0]);
+        for (NewsItem.LabelRef l : userLabels) labelNames.add(l.name());
         label.setItems(labelNames);
         label.setValue("(none)");
         if (existing != null) {
@@ -185,7 +187,8 @@ public class FiltersDialog extends Dialog {
             if (markRead.getValue()) actions.add("MARK_READ");
             if (markSticky.getValue()) actions.add("MARK_STICKY");
             if (!"(none)".equals(label.getValue())) {
-                for (String[] l : LABELS) if (l[0].equals(label.getValue())) actions.add("LABEL:" + l[1]);
+                userLabels.stream().filter(l -> l.name().equals(label.getValue())).findFirst()
+                        .ifPresent(l -> actions.add("LABEL:" + l.id()));
             }
             news.saveFilter(subject, new FilterDef(existing != null ? existing.id() : null,
                     name.getValue().trim(), existing == null || existing.enabled(), mode.getValue(), conds, actions));

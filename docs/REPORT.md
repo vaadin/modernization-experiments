@@ -698,8 +698,7 @@ search**, retention cap, smart folders, drag-reorder of channels *and* folders, 
 per-feed auth) and we added what the desktop app lacks (multi-user, Keycloak SSO, per-user isolation,
 zero-install web). But RSSOwl the *application* still has whole subsystems we deliberately didn't
 build: news filters/actions, notifications, OPML import/export UI, scheduled per-feed refresh, keyboard
-navigation, news bins, and sync. Labels are a basic single-colour-per-item subset (no label CRUD /
-multi-label). Faithful on the slice; a fraction of the
+navigation, news bins, and sync. Labels are a basic single-colour-per-item subset. Faithful on the slice; a fraction of the
 whole app — exactly the honest scope this experiment set out to measure. _(Update, Days 7–14: much of
 this list was subsequently built — inline article rendering (Day 7), Lucene full-text search (Day 9),
 OPML import/export UI (Day 10), notifications (Days 11/13), scheduled refresh (Day 12), and the news
@@ -993,6 +992,29 @@ news arrives.
 - **Honest scope:** conditions are `contains` only (no age/state/regex operators), and actions are the
   three that map to per-user state (no move-to-bin/delete — we have no bins). It's a faithful, working
   subset of RSSOwl's filter system, not the whole thing.
+
+### Day 15 — label management (custom labels + multi-label)
+
+Closed the last sizeable partial: labels were a fixed five, one-per-item; now they're **user-managed**
+(create / rename / recolour / delete) and a news item can carry **several** — RSSOwl's model. A per-user
+`Label` entity (seeded with RSSOwl's five defaults on first login) replaces the hardcoded list; the
+single `ArticleState.labelColor` string becomes a `Set<Long> labelIds`; the context-menu "Label" submenu
+is built from the user's labels (each toggles on/off across the selection) plus "Manage labels…"; the
+title cell shows a colour **chip per assigned label**; and a Manage-labels dialog does the CRUD.
+
+- **Kept the blast radius small with a derived accessor.** Rather than rewrite every render/predicate
+  site, `NewsItem.labelColor()` now derives from the first assigned label, so the title/reader colour and
+  the "Labeled" smart-folder predicate (`labelColor()!=null`) keep working unchanged; new code uses
+  `labels()`. The filter "assign label" action now stores a label **id** (resolved to the user's current
+  labels), and deleting a label cleans it off every item that had it.
+- **Verified:** multi-label rendering proven end-to-end in the browser — two labels assigned to an
+  article show as two colour chips (Important red + Work blue) on its row. Label CRUD, multi-label
+  assignment, per-user isolation, delete-removes-from-items, and default-seeding are unit-tested.
+  **53 tests green.** As with the other `GridContextMenu`/Dialog features, the context-menu assignment
+  and Manage-labels dialog are exercised by unit tests + the rendering path rather than synthetic
+  right-click (the documented Playwright/Vaadin overlay limitation).
+
+![A headline tagged with two colour-chip labels (Important + Work), from the user's managed label set](after/labels.png)
 
 ## Honest findings so far
 

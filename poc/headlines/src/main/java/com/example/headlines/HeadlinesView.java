@@ -97,10 +97,8 @@ public class HeadlinesView extends Div {
             {"News with Attachments", "attachments"}, {"Sticky News", "sticky"},
             {"Labeled News", "labeled"}};
 
-    /** RSSOwl's default labels: {name, CSS colour}. Assigned per-article via the context menu. */
-    private static final String[][] LABELS = {
-            {"Important", "#c62828"}, {"Work", "#1565c0"}, {"Personal", "#2e7d32"},
-            {"To Do", "#ef6c00"}, {"Later", "#6a1b9a"}};
+    private final List<NewsItem.LabelRef> userLabels = new ArrayList<>(); // this user's managed labels
+    private GridMenuItem<Row> labelRoot; // the context-menu "Label" submenu, repopulated on label CRUD
 
     private List<NewsItem> allItems; // reloaded after add/unsubscribe
     private List<NewsItem> currentItems; // the feed/folder/smart-folder selection
@@ -149,8 +147,10 @@ public class HeadlinesView extends Div {
         this.subject = user.getSubject();
         this.displayName = user.getPreferredUsername() != null ? user.getPreferredUsername() : user.getName();
 
-        // First login for this user? Seed their default subscriptions, then load their headlines.
+        // First login for this user? Seed their default subscriptions + labels, then load their headlines.
         news.ensureSeeded(subject);
+        news.ensureLabels(subject);
+        userLabels.addAll(news.labels(subject));
 
         // Run the user's news filters over their news on open (RSSOwl applies filters as news arrives);
         // actions are additive/idempotent so this never undoes a manual change.
@@ -943,13 +943,10 @@ public class HeadlinesView extends Div {
         GridMenuItem<Row> sticky = menu.addItem("Make sticky", e -> e.getItem().ifPresent(r ->
                 setStickyBulk(actionTargets(r), !(r instanceof Row.ItemRow ir && ir.news().sticky()))));
 
-        // Label submenu (RSSOwl: assign a coloured label to a news item).
-        GridMenuItem<Row> label = menu.addItem("Label");
-        for (String[] lbl : LABELS) {
-            String color = lbl[1];
-            label.getSubMenu().addItem(lbl[0], e -> e.getItem().ifPresent(r -> applyLabelBulk(actionTargets(r), color)));
-        }
-        label.getSubMenu().addItem("Remove label", e -> e.getItem().ifPresent(r -> applyLabelBulk(actionTargets(r), null)));
+        // Label submenu (RSSOwl: assign the user's labels to news, multi-label). Built from the user's
+        // managed labels and rebuilt on label CRUD; each item toggles that label across the target rows.
+        labelRoot = menu.addItem("Label");
+        populateLabelSubmenu();
 
         menu.setDynamicContentHandler(row -> {
             if (!(row instanceof Row.ItemRow ir)) return false; // no menu on group rows
@@ -957,9 +954,57 @@ public class HeadlinesView extends Div {
             String suffix = n > 1 ? " (" + n + ")" : ""; // show how many rows the action will affect
             read.setText((ir.news().unread() ? "Mark read" : "Mark unread") + suffix);
             sticky.setText((ir.news().sticky() ? "Remove sticky" : "Make sticky") + suffix);
-            label.setText("Label" + suffix);
+            labelRoot.setText("Label" + suffix);
             return true;
         });
+    }
+
+    /** (Re)build the Label submenu from the user's managed labels: one toggle per label, plus clear +
+     *  manage. Called at startup and after label CRUD. */
+    private void populateLabelSubmenu() {
+        labelRoot.getSubMenu().removeAll();
+        for (NewsItem.LabelRef lr : userLabels) {
+            labelRoot.getSubMenu().addItem(lr.name(),
+                    e -> e.getItem().ifPresent(r -> toggleLabelBulk(actionTargets(r), lr.id())));
+        }
+        labelRoot.getSubMenu().addItem("Clear labels", e -> e.getItem().ifPresent(r -> clearLabelsBulk(actionTargets(r))));
+        labelRoot.getSubMenu().addItem("Manage labels…", e -> openLabelsDialog());
+    }
+
+    /** Toggle one label across the target rows: add it where missing, or remove it if every row has it. */
+    private void toggleLabelBulk(List<Row.ItemRow> rows, long labelId) {
+        if (rows.isEmpty()) return;
+        boolean allHave = rows.stream().allMatch(ir -> ir.news().labels().stream().anyMatch(l -> l.id() == labelId));
+        for (Row.ItemRow ir : rows) {
+            java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
+            ir.news().labels().forEach(l -> ids.add(l.id()));
+            if (allHave) ids.remove(labelId); else ids.add(labelId);
+            news.setLabels(subject, ir.news().id(), ids);
+            applyLabelsToItem(ir, ids);
+        }
+    }
+
+    private void clearLabelsBulk(List<Row.ItemRow> rows) {
+        for (Row.ItemRow ir : rows) {
+            news.setLabels(subject, ir.news().id(), java.util.Set.of());
+            applyLabelsToItem(ir, java.util.Set.of());
+        }
+    }
+
+    /** Reflect a new label-id set onto the in-memory NewsItem (resolving names/colours) and refresh the row. */
+    private void applyLabelsToItem(Row.ItemRow ir, java.util.Set<Long> ids) {
+        List<NewsItem.LabelRef> resolved = userLabels.stream().filter(l -> ids.contains(l.id())).toList();
+        ir.news().setLabels(resolved);
+        headlines.getDataProvider().refreshItem(ir);
+    }
+
+    private void openLabelsDialog() {
+        new LabelsDialog(news, subject, () -> {
+            userLabels.clear();
+            userLabels.addAll(news.labels(subject));
+            populateLabelSubmenu();
+            reloadUserData(); // labels may have been recoloured/removed — re-resolve item labels
+        }).open();
     }
 
     /**
@@ -991,15 +1036,6 @@ public class HeadlinesView extends Div {
         }
     }
 
-    /** Assign (or clear, when {@code color} is null) a user label across the rows, persisted per user. */
-    private void applyLabelBulk(List<Row.ItemRow> rows, String color) {
-        for (Row.ItemRow ir : rows) {
-            ir.news().setLabelColor(color);
-            news.setLabel(subject, ir.news().id(), color);
-            headlines.getDataProvider().refreshItem(ir);
-        }
-    }
-
     // --- cell components ---
 
     private Component titleComponent(Row row) {
@@ -1011,7 +1047,20 @@ public class HeadlinesView extends Div {
         NewsItem n = ((Row.ItemRow) row).news();
         Span s = new Span(n.title());
         if (n.labelColor() != null) s.getStyle().set("color", n.labelColor());
-        return s;
+        if (n.labels().isEmpty()) return s;
+        // Show a small colour chip per assigned label after the title (multi-label, RSSOwl-style).
+        HorizontalLayout row2 = new HorizontalLayout(s);
+        row2.setSpacing(false);
+        row2.setAlignItems(FlexComponent.Alignment.CENTER);
+        row2.getStyle().set("gap", "4px");
+        for (NewsItem.LabelRef lr : n.labels()) {
+            Span chip = new Span();
+            chip.getElement().setAttribute("title", lr.name());
+            chip.getStyle().set("display", "inline-block").set("width", "9px").set("height", "9px")
+                    .set("border-radius", "50%").set("background-color", lr.color()).set("margin-left", "2px");
+            row2.add(chip);
+        }
+        return row2;
     }
 
     private Component itemOnly(Row row, java.util.function.Function<NewsItem, Component> fn) {

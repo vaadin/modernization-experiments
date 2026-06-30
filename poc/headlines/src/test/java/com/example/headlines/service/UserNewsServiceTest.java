@@ -57,6 +57,7 @@ class UserNewsServiceTest {
     @Autowired com.example.headlines.data.ColumnPrefRepository columnPrefs;
     @Autowired com.example.headlines.data.UserStateRepository userStates;
     @Autowired com.example.headlines.data.NewsFilterRepository newsFilters;
+    @Autowired com.example.headlines.data.LabelRepository labelRepo;
 
     private UserNewsService svc;
     // Stub full-text search: returns a fixed set of article IDs, so search() scoping is testable
@@ -67,7 +68,7 @@ class UserNewsServiceTest {
     void setUp() {
         ArticleSearch fakeSearch = (q, limit) -> List.copyOf(searchHits);
         svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs, columnPrefs,
-                userStates, newsFilters, fakeSearch);
+                userStates, newsFilters, labelRepo, fakeSearch);
     }
 
     @Test
@@ -101,16 +102,44 @@ class UserNewsServiceTest {
     }
 
     @Test
-    void labelIsPerUserAndExposedOnNewsItem() {
+    void labelsArePerUserAndExposedOnNewsItem() {
         Feed f = feeds.save(new Feed("https://feed", "F", null));
         Article a = articles.save(new Article(f, null, "https://x/1", "Item", "a", LocalDateTime.now(), false));
         subscriptions.save(new Subscription(ALICE, f, null, 0));
         subscriptions.save(new Subscription(BOB, f, null, 0));
 
-        svc.setLabel(ALICE, a.getId(), "#c62828");
+        long important = svc.createLabel(ALICE, "Important", "#c62828");
+        svc.setLabels(ALICE, a.getId(), java.util.Set.of(important));
 
-        assertEquals("#c62828", svc.newsItems(ALICE).get(0).labelColor());
-        assertNull(svc.newsItems(BOB).get(0).labelColor(), "bob sees no label (isolated)");
+        NewsItem aliceItem = svc.newsItems(ALICE).get(0);
+        assertEquals(1, aliceItem.labels().size());
+        assertEquals("Important", aliceItem.labels().get(0).name());
+        assertEquals("#c62828", aliceItem.labelColor(), "derived colour = first label");
+        assertTrue(svc.newsItems(BOB).get(0).labels().isEmpty(), "bob sees no labels (isolated)");
+    }
+
+    @Test
+    void multipleLabelsPerItemAndDeleteRemovesFromItems() {
+        Feed f = feeds.save(new Feed("https://feed", "F", null));
+        Article a = articles.save(new Article(f, null, "https://x/1", "Item", "a", LocalDateTime.now(), false));
+        subscriptions.save(new Subscription(ALICE, f, null, 0));
+
+        long work = svc.createLabel(ALICE, "Work", "#1565c0");
+        long todo = svc.createLabel(ALICE, "To Do", "#ef6c00");
+        svc.setLabels(ALICE, a.getId(), java.util.Set.of(work, todo));
+        assertEquals(2, svc.newsItems(ALICE).get(0).labels().size(), "two labels on one item");
+
+        svc.deleteLabel(ALICE, work);
+        var remaining = svc.newsItems(ALICE).get(0).labels();
+        assertEquals(1, remaining.size(), "deleting a label removes it from the item");
+        assertEquals("To Do", remaining.get(0).name());
+    }
+
+    @Test
+    void ensureLabelsSeedsTheFiveDefaultsOnce() {
+        assertEquals(5, svc.ensureLabels(ALICE).size(), "RSSOwl's five default labels seeded");
+        assertEquals(5, svc.ensureLabels(ALICE).size(), "idempotent — not re-seeded");
+        assertTrue(svc.labels(BOB).isEmpty(), "bob not seeded until his own first use");
     }
 
     @Test

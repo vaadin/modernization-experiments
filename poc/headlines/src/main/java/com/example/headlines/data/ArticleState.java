@@ -10,20 +10,26 @@
 
 package com.example.headlines.data;
 
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 /**
- * One user's per-article state: read/unread, sticky, and label colour. Rows are created lazily, only
- * when a user's state diverges from the default (unread, not sticky, no label). {@code owner} is the
+ * One user's per-article state: read/unread, sticky, and assigned labels. Rows are created lazily, only
+ * when a user's state diverges from the default (unread, not sticky, no labels). {@code owner} is the
  * Keycloak subject. This is the multi-user split of what was mutable state on {@code NewsItem}.
  */
 @Entity
@@ -46,7 +52,11 @@ public class ArticleState {
 
     private boolean sticky;
 
-    private String labelColor; // CSS hex, or null for none
+    /** Ids of the user's {@link Label}s assigned to this article (multi-label, RSSOwl-style). */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "article_state_label", joinColumns = @JoinColumn(name = "state_id"))
+    @Column(name = "label_id")
+    private Set<Long> labelIds = new LinkedHashSet<>();
 
     protected ArticleState() { }
 
@@ -62,6 +72,6 @@ public class ArticleState {
     public void setRead(boolean read) { this.read = read; }
     public boolean isSticky() { return sticky; }
     public void setSticky(boolean sticky) { this.sticky = sticky; }
-    public String getLabelColor() { return labelColor; }
-    public void setLabelColor(String labelColor) { this.labelColor = labelColor; }
+    public Set<Long> getLabelIds() { return labelIds; }
+    public void setLabelIds(Set<Long> labelIds) { this.labelIds = labelIds; }
 }

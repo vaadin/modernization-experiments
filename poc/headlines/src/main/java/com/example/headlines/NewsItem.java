@@ -11,6 +11,8 @@
 package com.example.headlines;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A single headline row. Port of the data behind RSSOwl's {@code NewsTableLabelProvider} /
@@ -26,6 +28,9 @@ public class NewsItem {
     /** Mirrors {@code org.rssowl.core.persist.INews.State}. */
     public enum State { NEW, UPDATED, UNREAD, READ }
 
+    /** A label assigned to this item, resolved from the user's {@code Label}s for display. */
+    public record LabelRef(long id, String name, String color) {}
+
     private final long id;
     private final String title;
     private final String author;
@@ -34,7 +39,8 @@ public class NewsItem {
     private final LocalDateTime date; // may be null -> sorts last, like RSSOwl
     private State state;
     private boolean sticky;
-    private String labelColor; // CSS hex like "#1565c0", or null for none; user-assignable
+    private String labelColor; // legacy single colour (fixture/back-compat); see labels for the real set
+    private final List<LabelRef> labels = new ArrayList<>(); // user labels assigned (multi-label)
     private final String link;
     private final boolean attachments; // RSS enclosure present -> "News with Attachments"
     private String content; // article HTML/summary from the feed; set after construction, may be null
@@ -70,7 +76,11 @@ public class NewsItem {
     public LocalDateTime date() { return date; }
     public State state() { return state; }
     public boolean sticky() { return sticky; }
-    public String labelColor() { return labelColor; }
+    /** The item's assigned labels (may be empty). */
+    public List<LabelRef> labels() { return labels; }
+    /** Convenience: the first assigned label's colour, else the legacy single colour, else null. Keeps
+     *  single-colour render sites and the "Labeled" smart-folder predicate (labelColor()!=null) working. */
+    public String labelColor() { return labels.isEmpty() ? labelColor : labels.get(0).color(); }
     public String link() { return link; }
     public boolean attachments() { return attachments; }
     public String content() { return content; }
@@ -99,9 +109,15 @@ public class NewsItem {
         this.sticky = sticky;
     }
 
-    /** Assign or clear (null) this item's user label colour. */
+    /** Assign or clear (null) this item's legacy single label colour (fixtures/back-compat). */
     public void setLabelColor(String labelColor) {
         this.labelColor = labelColor;
+    }
+
+    /** Replace this item's assigned labels (multi-label). */
+    public void setLabels(List<LabelRef> newLabels) {
+        labels.clear();
+        if (newLabels != null) labels.addAll(newLabels);
     }
 
     /** Status sort rank, mirroring RSSOwl's NEW &gt; UPDATED &gt; UNREAD &gt; READ priority. */
