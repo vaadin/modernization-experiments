@@ -55,6 +55,7 @@ class UserNewsServiceTest {
     @Autowired ArticleStateRepository states;
     @Autowired com.example.headlines.data.FolderPrefRepository folderPrefs;
     @Autowired com.example.headlines.data.ColumnPrefRepository columnPrefs;
+    @Autowired com.example.headlines.data.UserStateRepository userStates;
 
     private UserNewsService svc;
     // Stub full-text search: returns a fixed set of article IDs, so search() scoping is testable
@@ -64,7 +65,8 @@ class UserNewsServiceTest {
     @BeforeEach
     void setUp() {
         ArticleSearch fakeSearch = (q, limit) -> List.copyOf(searchHits);
-        svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs, columnPrefs, fakeSearch);
+        svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs, columnPrefs,
+                userStates, fakeSearch);
     }
 
     @Test
@@ -176,6 +178,14 @@ class UserNewsServiceTest {
         List<UserNewsService.FeedRef> refs = svc.feedRefs(ALICE);
         assertEquals(List.of("B", "A"), refs.stream().map(UserNewsService.FeedRef::title).toList());
         assertTrue(refs.stream().allMatch(r -> "News".equals(r.folder())));
+    }
+
+    @Test
+    void lastSeenStartsNullAndIsRecordedPerUser() {
+        org.junit.jupiter.api.Assertions.assertNull(svc.lastSeen(ALICE), "no visit recorded yet");
+        svc.markSeen(ALICE);
+        org.junit.jupiter.api.Assertions.assertNotNull(svc.lastSeen(ALICE), "alice's visit recorded");
+        org.junit.jupiter.api.Assertions.assertNull(svc.lastSeen(BOB), "bob unaffected (per-user)");
     }
 
     @Test

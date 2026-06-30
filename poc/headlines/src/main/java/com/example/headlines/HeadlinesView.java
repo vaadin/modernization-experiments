@@ -152,6 +152,21 @@ public class HeadlinesView extends Div {
         this.allItems = news.newsItems(subject);
         this.currentItems = allItems;
 
+        // "New since last visit" notification (RSSOwl pops one when a refresh brings in new news).
+        // Read last-seen before updating it; show the count once the view attaches.
+        java.time.LocalDateTime lastSeen = news.lastSeen(subject);
+        long newSinceLastVisit = lastSeen == null ? 0 : allItems.stream()
+                .filter(n -> n.date() != null && n.date().isAfter(lastSeen)).count();
+        news.markSeen(subject);
+        if (newSinceLastVisit > 0) {
+            addAttachListener(e -> {
+                Notification n = Notification.show(newSinceLastVisit + " new article"
+                        + (newSinceLastVisit == 1 ? "" : "s") + " since your last visit",
+                        5000, Notification.Position.TOP_END);
+                n.addThemeVariants(NotificationVariant.LUMO_PRIMARY);
+            });
+        }
+
         configureFeedTree();
         configureHeadlines();
         applyColumnPrefs(); // restore this user's saved column order/width/visibility

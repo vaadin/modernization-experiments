@@ -57,12 +57,14 @@ public class UserNewsService {
     private final ArticleStateRepository states;
     private final com.example.headlines.data.FolderPrefRepository folderPrefs;
     private final com.example.headlines.data.ColumnPrefRepository columnPrefs;
+    private final com.example.headlines.data.UserStateRepository userStates;
     private final ArticleSearch articleSearch;
 
     public UserNewsService(FeedRepository feeds, ArticleRepository articles,
             SubscriptionRepository subscriptions, ArticleStateRepository states,
             com.example.headlines.data.FolderPrefRepository folderPrefs,
             com.example.headlines.data.ColumnPrefRepository columnPrefs,
+            com.example.headlines.data.UserStateRepository userStates,
             ArticleSearch articleSearch) {
         this.feeds = feeds;
         this.articles = articles;
@@ -70,7 +72,24 @@ public class UserNewsService {
         this.states = states;
         this.folderPrefs = folderPrefs;
         this.columnPrefs = columnPrefs;
+        this.userStates = userStates;
         this.articleSearch = articleSearch;
+    }
+
+    /** When the user last opened the app (null on their first visit). */
+    @Transactional(readOnly = true)
+    public java.time.LocalDateTime lastSeen(String subject) {
+        return userStates.findByOwner(subject)
+                .map(com.example.headlines.data.UserState::getLastSeen).orElse(null);
+    }
+
+    /** Record "the user has now seen the app" — used to compute new-since-last-visit next time. */
+    @Transactional
+    public void markSeen(String subject) {
+        com.example.headlines.data.UserState st = userStates.findByOwner(subject)
+                .orElseGet(() -> new com.example.headlines.data.UserState(subject));
+        st.setLastSeen(java.time.LocalDateTime.now());
+        userStates.save(st);
     }
 
     /** First-login bootstrap: give a brand-new user the default subscription set (from default_feeds.xml). */

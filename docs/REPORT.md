@@ -904,6 +904,23 @@ without blocking. The OPML writer reuses the same folder-path model as the tree,
   `Receiver`), and downloads use `DownloadHandler`/`DownloadResponse` — the pre-25 APIs would not compile.
   Round-trip (write → parse, incl. nested paths and `&`-escaping) is unit-tested. **44 tests green.**
 
+### Day 11 — "new since last visit" notifications
+
+A small per-user touch: on opening the app you get a toast — *"N new articles since your last visit"* —
+the way RSSOwl pops a notification when a refresh finds new news. A new `UserState` row stores each
+user's `lastSeen` timestamp; on load we count the user's articles published since then, show the toast
+(`@Push` + `Notification`, top-right), and record the new visit.
+
+![A "new since your last visit" notification on opening the app](after/notification.png)
+
+- **Verified in-browser:** logging in showed *"4 new articles since your last visit"* on a normal return;
+  backdating `lastSeen` to 2020 produced *"2821 new articles…"* (matching the article count past that
+  date). Per-user, first-visit-suppressed, unit-tested (`lastSeen`/`markSeen`). **45 tests green.**
+- **Honest caveat:** this is *between-visit* notification, not live-while-watching. RSSOwl notifies when
+  its scheduled refresh pulls new items mid-session; we have no periodic background refresh yet (a
+  separate gap), so there's nothing new to announce while the page stays open. The "since last visit"
+  count is the meaningful, faithful slice of the feature our architecture supports today.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_
