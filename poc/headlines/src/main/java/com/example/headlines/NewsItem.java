@@ -37,6 +37,7 @@ public class NewsItem {
     private String labelColor; // CSS hex like "#1565c0", or null for none; user-assignable
     private final String link;
     private final boolean attachments; // RSS enclosure present -> "News with Attachments"
+    private String content; // article HTML/summary from the feed; set after construction, may be null
 
     /** Fixture constructor (feed defaults to the category, no attachments). */
     public NewsItem(long id, String title, String author, String category, LocalDateTime date,
@@ -72,6 +73,8 @@ public class NewsItem {
     public String labelColor() { return labelColor; }
     public String link() { return link; }
     public boolean attachments() { return attachments; }
+    public String content() { return content; }
+    public void setContent(String content) { this.content = content; }
 
     /** Bold in RSSOwl when NEW, UPDATED or UNREAD (see {@code NewsTableLabelProvider.getFont}). */
     public boolean unread() {

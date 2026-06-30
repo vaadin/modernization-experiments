@@ -36,6 +36,7 @@ import com.vaadin.flow.component.grid.dnd.GridDropMode;
 import com.vaadin.flow.data.provider.hierarchy.HierarchicalDataProvider.HierarchyFormat;
 import com.vaadin.flow.data.provider.hierarchy.TreeData;
 import com.vaadin.flow.data.provider.hierarchy.TreeDataProvider;
+import com.vaadin.flow.component.Html;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.Div;
 import com.vaadin.flow.component.html.H3;
@@ -758,6 +759,13 @@ public class HeadlinesView extends Div {
             Anchor link = new Anchor(it.link(), "Open original ↗");
             link.setTarget("_blank");
             reader.add(title, meta, link);
+
+            // The feed's own article HTML, rendered inline (RSSOwl uses an embedded browser; here it's
+            // a sanitized Html fragment — Vaadin's Html does NOT sanitize, so we clean it with jsoup).
+            String body = ArticleHtml.sanitize(it.content());
+            if (!body.isBlank()) {
+                reader.add(new Html("<div class=\"article-content\">" + body + "</div>"));
+            }
         });
         return reader;
     }

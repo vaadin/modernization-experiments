@@ -14,6 +14,7 @@ import com.example.headlines.data.Article;
 import com.example.headlines.data.ArticleRepository;
 import com.example.headlines.data.Feed;
 import com.example.headlines.data.FeedRepository;
+import com.rometools.rome.feed.synd.SyndContent;
 import com.rometools.rome.feed.synd.SyndEntry;
 import com.rometools.rome.feed.synd.SyndFeed;
 import com.rometools.rome.io.SyndFeedInput;
@@ -70,7 +71,8 @@ public class FeedFetchService {
         this.articles = articles;
     }
 
-    private record Raw(String link, String title, String author, LocalDateTime date, boolean attachments) {}
+    private record Raw(String link, String title, String author, LocalDateTime date, boolean attachments,
+            String content) {}
 
     @PostConstruct
     void init() {
@@ -176,11 +178,24 @@ public class FeedFetchService {
                 out.add(new Raw(link, blankTo(e.getTitle(), "(untitled)").strip(),
                         blankTo(e.getAuthor(), "Unknown"),
                         toLocalDateTime(e.getPublishedDate() != null ? e.getPublishedDate() : e.getUpdatedDate()),
-                        att));
+                        att, extractContent(e)));
             }
         }
         out.sort(Comparator.comparing(Raw::date, Comparator.nullsLast(Comparator.reverseOrder())));
         return out.size() > PER_FEED_MAX ? out.subList(0, PER_FEED_MAX) : out;
+    }
+
+    /** The article body the feed supplies: Atom {@code <content>} (preferred, fuller) else RSS
+     *  {@code <description>}. Returned as raw HTML; sanitized only when rendered. */
+    private static String extractContent(SyndEntry e) {
+        if (e.getContents() != null && !e.getContents().isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (SyndContent c : e.getContents()) {
+                if (c.getValue() != null) sb.append(c.getValue());
+            }
+            if (!sb.isEmpty()) return sb.toString();
+        }
+        return e.getDescription() != null ? e.getDescription().getValue() : null;
     }
 
     /** Persist new articles for the given owner (null = public/shared), de-duplicated by (feed, link, owner). */
@@ -192,7 +207,9 @@ public class FeedFetchService {
                     ? articles.findByFeedAndLinkAndOwnerIsNull(feed, r.link()).isPresent()
                     : articles.findByFeedAndLinkAndOwner(feed, r.link(), owner).isPresent();
             if (!exists) {
-                articles.save(new Article(feed, owner, r.link(), r.title(), r.author(), r.date(), r.attachments()));
+                Article a = new Article(feed, owner, r.link(), r.title(), r.author(), r.date(), r.attachments());
+                a.setContent(r.content());
+                articles.save(a);
                 saved++;
             }
         }

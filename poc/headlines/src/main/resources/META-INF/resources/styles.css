@@ -31,3 +31,17 @@ vaadin-grid::part(feed-category) {
 vaadin-grid::part(feed-saved) {
     font-style: italic;
 }
+
+/* Reader pane: inline article HTML from the feed. Keep images/embeds inside the pane and give the
+   text comfortable measure, so arbitrary feed markup doesn't blow out the layout. */
+.article-content {
+    margin-top: 0.75rem;
+    line-height: 1.5;
+    max-width: 48rem;
+}
+.article-content img,
+.article-content video,
+.article-content iframe {
+    max-width: 100%;
+    height: auto;
+}

@@ -697,10 +697,12 @@ search**, retention cap, smart folders, drag-reorder of channels *and* folders, 
 per-feed auth) and we added what the desktop app lacks (multi-user, Keycloak SSO, per-user isolation,
 zero-install web). But RSSOwl the *application* still has whole subsystems we deliberately didn't
 build: **full-text (Lucene) search** with saved-search criteria (ours is a live substring filter over
-the loaded headlines, not an index), embedded-browser article rendering, news filters/actions,
-notifications, OPML import/export UI, scheduled per-feed refresh, keyboard navigation, news bins, and
-sync. Labels are a basic single-colour-per-item subset (no label CRUD / multi-label). Faithful on the
-slice; a fraction of the whole app — exactly the honest scope this experiment set out to measure.
+the loaded headlines, not an index), news filters/actions, notifications, OPML import/export UI,
+scheduled per-feed refresh, keyboard navigation, news bins, and sync. Labels are a basic
+single-colour-per-item subset (no label CRUD / multi-label). Faithful on the slice; a fraction of the
+whole app — exactly the honest scope this experiment set out to measure. _(Update, Day 7: the
+embedded-browser article rendering gap is now largely closed — the reader renders each article's feed
+HTML inline; see below.)_
 
 **A clarification worth recording (it was nearly mis-stated as a finding).** RSSOwl is *not* "mostly
 SWT scaffolding" — SWT isn't even in its 121k lines (it's an external Eclipse dependency); its own
@@ -788,6 +790,32 @@ same 15 folders + 12 loose top-level channels + the 5 smart folders, and expandi
 *Windows / Linux / Mac / PDA* (then its direct feeds) — the original nesting and OPML order, 1:1.
 
 ![Alice's feeds tree, seeded 1:1 from RSSOwl's default OPML — nested folders (Computers › Windows/Linux/Mac/PDA)](after/vaadin-tree-mirror.png)
+
+### Day 7 — the reader actually reads now (inline article content)
+
+Until now the bottom pane showed only the title, a metadata line, and an "Open original" link — RSSOwl's
+equivalent is a full **embedded SWT `Browser`** rendering the article. We closed most of that gap the
+web-native way: the fetcher now keeps each entry's **feed-supplied HTML** (ROME's Atom `<content>`,
+falling back to RSS `<description>`) on `Article`, carried through to the reader, which renders it inline.
+
+![The reader rendering an article's feed HTML inline, sanitized](after/reader-content.png)
+
+The honest details:
+- **It renders the feed's content, not a live web page.** Most feeds ship a full article or a decent
+  summary in `<content>`/`<description>`; that's what shows. It is *not* a browser loading the original
+  URL — see the caveat below for why true page-embedding is impractical.
+- **Vaadin's `Html` does not sanitize — that's a documented footgun.** The component injects raw markup;
+  the Vaadin security docs say so explicitly and recommend **jsoup**. So feed HTML is cleaned through a
+  jsoup "relaxed" allow-list (no `<script>`/`<style>`/inline event handlers/`javascript:` URLs) in a
+  small `ArticleHtml.sanitize(...)` util, links forced to `target="_blank" rel="noopener"`. Covered by
+  `ArticleHtmlTest` (script/`onerror`/`javascript:` stripped, formatting kept) — **39 tests green**.
+- **Why not a real embedded browser (an `<iframe>` of the original URL)?** Most news sites send
+  `X-Frame-Options: DENY` or a CSP `frame-ancestors` directive, so the frame renders blank. RSSOwl's
+  desktop `Browser` widget has no such restriction; a web app does. Rendering the feed's own content is
+  the reliable equivalent, with "Open original ↗" still there for the full page.
+- **Storage + a migration note:** the body is a CLOB (`@Lob`) on `Article`. Because the fetcher
+  de-duplicates, *existing* rows aren't back-filled — content only lands on a fresh fetch, so the H2 DB
+  was recreated (the 2009 feeds that still resolve now carry article text; dead ones stay empty).
 
 What this took, and the honest caveats:
 - **The folder model had to grow from flat to nested.** Subscriptions store a folder *path*

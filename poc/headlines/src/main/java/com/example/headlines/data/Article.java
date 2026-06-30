@@ -17,6 +17,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
+import jakarta.persistence.Lob;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
@@ -61,6 +62,11 @@ public class Article {
 
     private boolean attachments;
 
+    /** The article's HTML body/summary as supplied by the feed (RSS description / Atom content),
+     *  shown in the reader pane. Sanitized at render time, not here. Nullable; can be large -> CLOB. */
+    @Lob
+    private String content;
+
     protected Article() { }
 
     public Article(Feed feed, String owner, String link, String title, String author,
@@ -82,4 +88,6 @@ public class Article {
     public String getAuthor() { return author; }
     public LocalDateTime getPublishedDate() { return publishedDate; }
     public boolean isAttachments() { return attachments; }
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
 }

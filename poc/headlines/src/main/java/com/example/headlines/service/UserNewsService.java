@@ -110,9 +110,11 @@ public class UserNewsService {
                 boolean read = st != null && st.isRead();
                 boolean sticky = st != null && st.isSticky();
                 String label = st != null ? st.getLabelColor() : null;
-                out.add(new NewsItem(a.getId(), a.getTitle(), a.getAuthor(), folder, sub.displayTitle(),
+                NewsItem item = new NewsItem(a.getId(), a.getTitle(), a.getAuthor(), folder, sub.displayTitle(),
                         a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, label,
-                        a.getLink(), a.isAttachments()));
+                        a.getLink(), a.isAttachments());
+                item.setContent(a.getContent());
+                out.add(item);
             }
         }
         return out;
