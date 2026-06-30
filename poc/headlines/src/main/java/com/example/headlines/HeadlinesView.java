@@ -265,7 +265,7 @@ public class HeadlinesView extends Div {
         feedTree.addHierarchyColumn(FeedNode::label).setHeader("Feeds");
         feedTree.setDataProvider(feedDataProvider);
         feedTree.setPartNameGenerator(n -> n instanceof FeedNode.Category ? "feed-category"
-                : n instanceof FeedNode.Saved ? "feed-saved" : null);
+                : (n instanceof FeedNode.Saved || n instanceof FeedNode.SavedSearch) ? "feed-saved" : null);
         enableFeedDragAndDrop();
 
         feedTree.addSelectionListener(e -> {
@@ -279,20 +279,36 @@ public class HeadlinesView extends Div {
                 currentItems = allItems.stream().filter(n -> f.name().equals(n.feed())).toList();
             } else if (sel instanceof FeedNode.Saved sv) {
                 currentItems = allItems.stream().filter(savedPredicate(sv.key())).toList();
+            } else if (sel instanceof FeedNode.SavedSearch ss) {
+                // A saved search re-runs its Lucene query over the whole archive (results, not a filter).
+                currentItems = news.search(subject, ss.query());
             } else {
                 currentItems = allItems;
             }
             applyGrouping(currentGroupBy);
         });
 
-        // Right-click a channel: set HTTP credentials or unsubscribe (RSSOwl bookmark actions).
-        // Feeds only.
+        // Right-click a channel: set credentials / unsubscribe; right-click a saved search: delete it.
         GridContextMenu<FeedNode> feedMenu = feedTree.addContextMenu();
-        feedMenu.addItem("Set credentials…", e -> e.getItem()
+        GridMenuItem<FeedNode> credItem = feedMenu.addItem("Set credentials…", e -> e.getItem()
                 .filter(n -> n instanceof FeedNode.Feed)
                 .ifPresent(n -> openCredentialsDialog((FeedNode.Feed) n)));
-        feedMenu.addItem("Unsubscribe", e -> e.getItem().ifPresent(this::unsubscribe));
-        feedMenu.setDynamicContentHandler(node -> node instanceof FeedNode.Feed);
+        GridMenuItem<FeedNode> unsubItem = feedMenu.addItem("Unsubscribe", e -> e.getItem()
+                .filter(n -> n instanceof FeedNode.Feed).ifPresent(this::unsubscribe));
+        GridMenuItem<FeedNode> delSearchItem = feedMenu.addItem("Delete saved search", e -> e.getItem()
+                .filter(n -> n instanceof FeedNode.SavedSearch).ifPresent(n -> {
+                    news.deleteSavedSearch(subject, ((FeedNode.SavedSearch) n).id());
+                    reloadUserData();
+                    Notification.show("Saved search deleted");
+                }));
+        feedMenu.setDynamicContentHandler(node -> {
+            boolean feed = node instanceof FeedNode.Feed;
+            boolean savedSearch = node instanceof FeedNode.SavedSearch;
+            credItem.setVisible(feed);
+            unsubItem.setVisible(feed);
+            delSearchItem.setVisible(savedSearch);
+            return feed || savedSearch; // no menu on folders / fixed smart folders
+        });
     }
 
     /** A download link that serves the user's current subscriptions as an OPML file (RSSOwl-style export). */
@@ -399,6 +415,31 @@ public class HeadlinesView extends Div {
         dialog.open();
     }
 
+    /** Save the current query as a named saved search (shown as a smart folder in the tree). */
+    private void openSaveSearchDialog(String query) {
+        if (query == null || query.isBlank()) return;
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle("Save search");
+        TextField name = new TextField("Name");
+        name.setWidthFull();
+        name.setValue(query); // sensible default: the query text
+        Span q = new Span("Query: " + query);
+        q.getStyle().set("color", "var(--vaadin-text-color-secondary, gray)").set("font-size", "var(--lumo-font-size-s)");
+        dialog.add(new VerticalLayout(name, q));
+        Button save = new Button("Save", e -> {
+            if (name.getValue() == null || name.getValue().isBlank()) {
+                name.setInvalid(true); name.setErrorMessage("A name is required"); return;
+            }
+            news.createSavedSearch(subject, name.getValue().trim(), query);
+            reloadUserData();
+            dialog.close();
+            Notification.show("Saved search created");
+        });
+        save.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), save);
+        dialog.open();
+    }
+
     /** Login dialog for a feed's HTTP credentials (RSSOwl: "Feed requires authentication"). */
     private void openCredentialsDialog(FeedNode.Feed feed) {
         Dialog dialog = new Dialog();
@@ -496,6 +537,11 @@ public class HeadlinesView extends Div {
         for (String[] s : SAVED) {
             int c = (int) allItems.stream().filter(savedPredicate(s[1])).count();
             feedData.addItem(null, new FeedNode.Saved(s[0], s[1], c));
+        }
+        // The user's own saved searches (persisted Lucene queries), below the fixed smart folders.
+        for (UserNewsService.SavedSearchRef ss : news.savedSearches(subject)) {
+            int c = ss.query().isBlank() ? 0 : news.search(subject, ss.query()).size();
+            feedData.addItem(null, new FeedNode.SavedSearch(ss.id(), ss.name(), ss.query(), c));
         }
     }
 
@@ -660,8 +706,16 @@ public class HeadlinesView extends Div {
         search.setClearButtonVisible(true);
         search.setValueChangeMode(com.vaadin.flow.data.value.ValueChangeMode.LAZY);
         search.setPrefixComponent(VaadinIcon.SEARCH.create());
+
+        // Save the current query as a saved search (RSSOwl: persist a search as a smart folder).
+        Button saveSearch = new Button(VaadinIcon.BOOKMARK.create(), e -> openSaveSearchDialog(searchTerm));
+        saveSearch.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        saveSearch.getElement().setAttribute("title", "Save this search");
+        saveSearch.setEnabled(false);
+
         search.addValueChangeListener(e -> {
             searchTerm = e.getValue() == null ? "" : e.getValue().trim();
+            saveSearch.setEnabled(!searchTerm.isBlank());
             applyGrouping(currentGroupBy);
         });
 
@@ -694,7 +748,7 @@ public class HeadlinesView extends Div {
         Button logout = new Button("Log out", e -> authContext.logout());
         logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
 
-        HorizontalLayout bar = new HorizontalLayout(groupBy, search, columnsMenu, filters, autoRead, who, logout);
+        HorizontalLayout bar = new HorizontalLayout(groupBy, search, saveSearch, columnsMenu, filters, autoRead, who, logout);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
         bar.setFlexGrow(1, who); // push logout to the right

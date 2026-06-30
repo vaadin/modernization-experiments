@@ -58,6 +58,7 @@ class UserNewsServiceTest {
     @Autowired com.example.headlines.data.UserStateRepository userStates;
     @Autowired com.example.headlines.data.NewsFilterRepository newsFilters;
     @Autowired com.example.headlines.data.LabelRepository labelRepo;
+    @Autowired com.example.headlines.data.SavedSearchRepository savedSearches;
 
     private UserNewsService svc;
     // Stub full-text search: returns a fixed set of article IDs, so search() scoping is testable
@@ -68,7 +69,7 @@ class UserNewsServiceTest {
     void setUp() {
         ArticleSearch fakeSearch = (q, limit) -> List.copyOf(searchHits);
         svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs, columnPrefs,
-                userStates, newsFilters, labelRepo, fakeSearch);
+                userStates, newsFilters, labelRepo, savedSearches, fakeSearch);
     }
 
     @Test
@@ -133,6 +134,22 @@ class UserNewsServiceTest {
         var remaining = svc.newsItems(ALICE).get(0).labels();
         assertEquals(1, remaining.size(), "deleting a label removes it from the item");
         assertEquals("To Do", remaining.get(0).name());
+    }
+
+    @Test
+    void savedSearchesAreCrudAndPerUser() {
+        long id = svc.createSavedSearch(ALICE, "Linux stuff", "linux OR kernel");
+        var aliceSearches = svc.savedSearches(ALICE);
+        assertEquals(1, aliceSearches.size());
+        assertEquals("Linux stuff", aliceSearches.get(0).name());
+        assertEquals("linux OR kernel", aliceSearches.get(0).query());
+        assertTrue(svc.savedSearches(BOB).isEmpty(), "bob has none (per-user)");
+
+        svc.deleteSavedSearch(BOB, id); // wrong owner — must not delete alice's
+        assertEquals(1, svc.savedSearches(ALICE).size(), "another user can't delete it");
+
+        svc.deleteSavedSearch(ALICE, id);
+        assertTrue(svc.savedSearches(ALICE).isEmpty(), "owner can delete");
     }
 
     @Test

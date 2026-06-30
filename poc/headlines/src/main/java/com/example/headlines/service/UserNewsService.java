@@ -66,7 +66,11 @@ public class UserNewsService {
     private final com.example.headlines.data.UserStateRepository userStates;
     private final com.example.headlines.data.NewsFilterRepository newsFilters;
     private final com.example.headlines.data.LabelRepository labelRepo;
+    private final com.example.headlines.data.SavedSearchRepository savedSearches;
     private final ArticleSearch articleSearch;
+
+    /** A user's saved search, detached for the view. */
+    public record SavedSearchRef(long id, String name, String query) {}
 
     /** RSSOwl's default labels (name, colour), seeded per user on first use. */
     private static final String[][] DEFAULT_LABELS = {
@@ -80,6 +84,7 @@ public class UserNewsService {
             com.example.headlines.data.UserStateRepository userStates,
             com.example.headlines.data.NewsFilterRepository newsFilters,
             com.example.headlines.data.LabelRepository labelRepo,
+            com.example.headlines.data.SavedSearchRepository savedSearches,
             ArticleSearch articleSearch) {
         this.feeds = feeds;
         this.articles = articles;
@@ -90,7 +95,28 @@ public class UserNewsService {
         this.userStates = userStates;
         this.newsFilters = newsFilters;
         this.labelRepo = labelRepo;
+        this.savedSearches = savedSearches;
         this.articleSearch = articleSearch;
+    }
+
+    // --- saved searches (RSSOwl: a persisted search shown as a smart folder) ---
+
+    /** The user's saved searches, in order. */
+    @Transactional(readOnly = true)
+    public List<SavedSearchRef> savedSearches(String subject) {
+        return savedSearches.findByOwnerOrderByPositionAsc(subject).stream()
+                .map(s -> new SavedSearchRef(s.getId(), s.getName(), s.getQuery())).toList();
+    }
+
+    @Transactional
+    public long createSavedSearch(String subject, String name, String query) {
+        int pos = savedSearches.findByOwnerOrderByPositionAsc(subject).size();
+        return savedSearches.save(new com.example.headlines.data.SavedSearch(subject, name, query, pos)).getId();
+    }
+
+    @Transactional
+    public void deleteSavedSearch(String subject, long id) {
+        savedSearches.findById(id).filter(s -> s.getOwner().equals(subject)).ifPresent(savedSearches::delete);
     }
 
     // --- labels (RSSOwl's manageable labels: per-user CRUD, multi-label per item) ---

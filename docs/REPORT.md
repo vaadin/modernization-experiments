@@ -1016,6 +1016,23 @@ title cell shows a colour **chip per assigned label**; and a Manage-labels dialo
 
 ![A headline tagged with two colour-chip labels (Important + Work), from the user's managed label set](after/labels.png)
 
+### Day 16 — saved searches
+
+A small win riding on the Lucene work: the toolbar search can now be **saved** as a named smart folder
+(RSSOwl persists searches the same way). A bookmark button next to the search box — enabled once you've
+typed a query — saves it; the saved search appears in the feeds tree under the fixed smart folders
+(`🔎 name (count)`), and selecting it re-runs the full-text query. Per-user `SavedSearch` entity; right-click
+→ "Delete saved search".
+
+- **Verified end-to-end in the browser:** typed `kernel`, saved it, and **🔎 kernel (23)** appeared in the
+  tree with the correct live count; selecting it loaded the kernel/security results (including body-only
+  matches). CRUD + per-user isolation are unit-tested. **54 tests green.**
+
+![A saved search "🔎 kernel (23)" in the feeds tree, re-running its Lucene query on selection](after/saved-search.png)
+
+This was the last small gap worth closing. What remains is genuinely out of scope or impossible on the
+web (see below).
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_

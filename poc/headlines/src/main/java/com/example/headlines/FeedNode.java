@@ -15,7 +15,8 @@ package com.example.headlines;
  * folder or a {@link Feed} under it. The label carries an unread-style count in parentheses, like
  * RSSOwl ("Business (151)").
  */
-public sealed interface FeedNode permits FeedNode.Category, FeedNode.Feed, FeedNode.Saved {
+public sealed interface FeedNode
+        permits FeedNode.Category, FeedNode.Feed, FeedNode.Saved, FeedNode.SavedSearch {
 
     String label();
 
@@ -40,5 +41,11 @@ public sealed interface FeedNode permits FeedNode.Category, FeedNode.Feed, FeedN
      *  predicate; count shown only when &gt; 0, like RSSOwl. */
     record Saved(String name, String key, int count) implements FeedNode {
         @Override public String label() { return count > 0 ? name + "  (" + count + ")" : name; }
+    }
+
+    /** A user-defined saved search (RSSOwl: a persisted search query shown as a folder). {@code query}
+     *  is the Lucene query run when selected; {@code id} ties it to the persisted row for deletion. */
+    record SavedSearch(long id, String name, String query, int count) implements FeedNode {
+        @Override public String label() { return "🔎 " + name + (count > 0 ? "  (" + count + ")" : ""); }
     }
 }
