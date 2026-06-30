@@ -61,6 +61,7 @@ public class FeedFetchService {
     private final FeedRepository feeds;
     private final ArticleRepository articles;
     private final ArticleSearchService search;
+    private final FeedBroadcaster broadcaster;
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
@@ -70,10 +71,12 @@ public class FeedFetchService {
     // Guards the shared full refresh so the periodic timer never overlaps the startup fetch (or itself).
     private final java.util.concurrent.atomic.AtomicBoolean refreshing = new java.util.concurrent.atomic.AtomicBoolean();
 
-    public FeedFetchService(FeedRepository feeds, ArticleRepository articles, ArticleSearchService search) {
+    public FeedFetchService(FeedRepository feeds, ArticleRepository articles, ArticleSearchService search,
+            FeedBroadcaster broadcaster) {
         this.feeds = feeds;
         this.articles = articles;
         this.search = search;
+        this.broadcaster = broadcaster;
     }
 
     private record Raw(String link, String title, String author, LocalDateTime date, boolean attachments,
@@ -151,6 +154,9 @@ public class FeedFetchService {
                 }
             }
             log.info("Feed refresh complete: {} new public article(s) across {} feed(s).", saved, all.size());
+            if (saved > 0) {
+                broadcaster.broadcast(); // tell open sessions new articles arrived (live notification)
+            }
         } finally {
             pool.shutdownNow();
         }

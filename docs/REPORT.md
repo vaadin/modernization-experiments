@@ -939,6 +939,30 @@ automatically and the new items feed the next "since last visit" count.
   broadcasting to attached UIs, which we haven't wired. So "notifications" remain between-visit; periodic
   refresh just means there's genuinely new content to find on the next visit or feed reload.
 
+### Day 13 — live in-session notifications (the notifications story, completed)
+
+Day 11 gave a *between-visit* count; Day 12 added a refresh timer; this closes the loop — when the
+periodic refresh finds new articles, **open pages get a live toast**, RSSOwl-style, with no reload. A
+singleton `FeedBroadcaster` is signalled by `FeedFetchService` after any refresh that saved something;
+each open `HeadlinesView` registers a listener on attach (unregisters on detach) and, via `@Push` +
+`UI.access`, shows a toast — *"N new articles arrived"* with a **Show** action that pulls them into the
+tree + grid.
+
+- **Per-user accurate, not a blanket broadcast.** On the signal each view recomputes its *own* delta
+  (`news.newsItems(subject).size()` vs what's loaded), so the count reflects only the user's subscribed
+  feeds, and a user subscribed to none of the updated feeds sees nothing — the same owner-scoping the rest
+  of the app uses. Listeners are invoked on the refresh thread and each marshals to its UI with
+  `UI.access`; a dead UI's failure is swallowed so the fan-out reaches the others.
+- **Verified live in-browser:** with alice's page open and the interval set to 30 s, injecting 3 fresh
+  articles into a feed she follows and letting the next background cycle run produced the toast
+  *"12 new articles arrived"* (the 3 plus items accumulated across cycles) — pushed to the open page, no
+  user action. **45 tests green.**
+
+![A live "new articles arrived" toast pushed into an open page by the background refresh](after/live-notification.png)
+
+With this, the notifications feature matches RSSOwl's shape: a popup when a refresh brings in new news,
+both between visits and live while you watch.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_

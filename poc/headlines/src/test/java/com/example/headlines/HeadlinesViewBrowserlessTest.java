@@ -59,7 +59,8 @@ class HeadlinesViewBrowserlessTest extends BrowserlessTest {
         when(news.columnPrefs("alice-subject")).thenReturn(List.of()); // default layout, no saved prefs
 
         var fetch = mock(FeedFetchService.class);
-        return new HeadlinesView(news, fetch, auth);
+        var broadcaster = new com.example.headlines.service.FeedBroadcaster();
+        return new HeadlinesView(news, fetch, broadcaster, auth);
     }
 
     @Test

@@ -132,13 +132,17 @@ public class HeadlinesView extends Div {
 
     private final UserNewsService news;
     private final FeedFetchService feedFetch;
+    private final com.example.headlines.service.FeedBroadcaster broadcaster;
     private final AuthenticationContext authContext;
     private final String subject;      // Keycloak subject — the per-user key
     private final String displayName;  // for the header
+    private com.vaadin.flow.shared.Registration broadcastReg; // live-refresh listener handle
 
-    public HeadlinesView(UserNewsService news, FeedFetchService feedFetch, AuthenticationContext authContext) {
+    public HeadlinesView(UserNewsService news, FeedFetchService feedFetch,
+            com.example.headlines.service.FeedBroadcaster broadcaster, AuthenticationContext authContext) {
         this.news = news;
         this.feedFetch = feedFetch;
+        this.broadcaster = broadcaster;
         this.authContext = authContext;
         OidcUser user = authContext.getAuthenticatedUser(OidcUser.class)
                 .orElseThrow(() -> new IllegalStateException("No authenticated user"));
@@ -208,10 +212,39 @@ public class HeadlinesView extends Div {
         outer.setSizeFull();
         add(outer);
 
-        // Don't let a queued auto-mark-read fire after the user navigates away / the UI is gone.
+        // Live notifications: while this page is open, the periodic background refresh signals us via
+        // the FeedBroadcaster; we marshal onto this UI thread (the app uses @Push) and show a toast if
+        // new articles relevant to THIS user arrived. Register on attach, unregister on detach.
+        addAttachListener(e -> {
+            UI ui = e.getUI();
+            broadcastReg = broadcaster.register(() -> ui.access(this::onNewArticlesArrived));
+        });
         addDetachListener(e -> {
+            if (broadcastReg != null) { broadcastReg.remove(); broadcastReg = null; }
             if (pendingAutoRead != null) pendingAutoRead.cancel(false);
         });
+    }
+
+    /**
+     * A background refresh added new public articles. Recompute how many are new <em>for this user</em>
+     * (their subscribed feeds only) by diffing against what's loaded; if any, show a non-disruptive toast
+     * with a "Show" action that pulls them into the tree + grid. Per-user accurate — a user not subscribed
+     * to the updated feeds sees no toast.
+     */
+    private void onNewArticlesArrived() {
+        List<NewsItem> latest = news.newsItems(subject);
+        int delta = latest.size() - allItems.size();
+        if (delta <= 0) return; // nothing new this user can see (or they already refreshed)
+
+        Span msg = new Span(delta + " new article" + (delta == 1 ? "" : "s") + " arrived");
+        Button show = new Button("Show", ev -> { reloadUserData(); });
+        show.addThemeVariants(ButtonVariant.LUMO_TERTIARY_INLINE);
+        Notification n = new Notification(msg, show);
+        n.setPosition(Notification.Position.TOP_END);
+        n.setDuration(8000);
+        n.addThemeVariants(NotificationVariant.LUMO_PRIMARY);
+        show.addClickListener(ev -> n.close());
+        n.open();
     }
 
     // --- left pane: feeds navigation tree (RSSOwl's BookMarkExplorer) ---
