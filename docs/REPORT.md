@@ -581,9 +581,10 @@ not an afternoon.
   independently; only `background-color: … !important` on `::part(sticky)` worked. This is the
   "owner-draw is the hardest" prediction coming true — milder than feared (a one-line CSS fix) but
   it cost a real debugging loop and only surfaced by *running and inspecting the shadow DOM*.
-- **`nullsLast` flips under descending sort.** RSSOwl always sorts null dates last; in Vaadin the
-  comparator is reversed for descending, so the null-date row sorts *first* under the default
-  date-desc sort. Faithful behaviour needs a direction-aware comparator — a subtle fidelity gap.
+- **`nullsLast` flips under descending sort** _(fixed — Day 8)_. RSSOwl always sorts null dates last;
+  in Vaadin the comparator is reversed for descending, so the null-date row sorted *first* under the
+  default date-desc sort. Fixed with a direction-aware comparator: hand the grid a **nulls-first**
+  comparator for descending (so its reversal lands nulls last), swapped via a `SortListener`. See "Day 8".
 - **Lumo theme variants don't apply under Aura** (`GridVariant.LUMO_ROW_STRIPES` showed no stripes).
 - **`MasterDetailLayout` has no Java API in the MCP** (lookup errored), so the POC used
   `SplitLayout`. Re-confirms the MCP is current but not exhaustive for the newest components.
@@ -817,6 +818,26 @@ The honest details:
   de-duplicates, *existing* rows aren't back-filled — content only lands on a fresh fetch, so the H2 DB
   was recreated (the 2009 feeds that still resolve now carry article text; dead ones stay empty).
 
+### Day 8 — direction-aware null sorting (the last in-slice stretch item)
+
+The final stretch item, and a clean illustration of an SWT-vs-Vaadin model difference. RSSOwl's
+`NewsComparator` is *direction-aware*: it always sorts undated items last, whichever way the date column
+is sorted. Vaadin's model is different — you give a column **one** comparator and the grid **reverses it**
+for a descending sort. So a `nullsLast` comparator becomes `nullsFirst` under descending, and undated
+rows jumped to the top of the default newest-first view.
+
+The fix is small once the model is clear: hand the grid a **nulls-first** comparator for descending (so
+its own reversal lands the nulls *last*, dates newest-first) and **nulls-last** for ascending — swapping
+between them in a `SortListener` (with a re-entrancy guard) and re-applying on the forced default sort.
+The exact semantics are pinned by `DateSortNullPolicyTest`, which simulates the grid's reversal:
+descending → newest first, undated still last. **41 tests green.**
+
+Honest note: this is a *workaround for a framework default*, not a Vaadin shortcoming per se — but it's
+exactly the kind of subtle behavioural fidelity that a naïve port gets wrong and only a reviewer who
+knows the original would catch. With this, every in-slice stretch item from the original plan is done;
+the remaining gaps (Lucene full-text, filters/actions, notifications, OPML-UI, news bins, sync) are
+whole out-of-slice subsystems.
+
 What this took, and the honest caveats:
 - **The folder model had to grow from flat to nested.** Subscriptions store a folder *path*
   (`"Computers/Windows"`); the OPML parser walks ancestor `<outline>`s to build it; the tree renderer
@@ -922,4 +943,4 @@ _(This section is the point of the experiment and grows as we go.)_
       item-click) — done; see "Day 5".
 - [x] **Auto-mark-read timer** (mark the displayed article read after 2s, via `@Push`) — done; see
       "Day 5". Surfaced the `Signal.peek()`-vs-`get()` rule.
-- [ ] Stretch (still beyond the timebox): direction-aware null sorting; then re-measure effort.
+- [x] **Direction-aware null sorting** (undated rows stay last in both directions) — done; see "Day 8".

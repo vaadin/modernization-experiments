@@ -33,6 +33,7 @@ import com.vaadin.flow.component.textfield.TextField;
 import com.example.headlines.service.AuthenticationRequiredException;
 import com.vaadin.flow.component.grid.dnd.GridDropLocation;
 import com.vaadin.flow.component.grid.dnd.GridDropMode;
+import com.vaadin.flow.data.provider.SortDirection;
 import com.vaadin.flow.data.provider.hierarchy.HierarchicalDataProvider.HierarchyFormat;
 import com.vaadin.flow.data.provider.hierarchy.TreeData;
 import com.vaadin.flow.data.provider.hierarchy.TreeDataProvider;
@@ -109,6 +110,7 @@ public class HeadlinesView extends Div {
     private final ValueSignal<NewsItem> selected = new ValueSignal<NewsItem>((NewsItem) null);
     private final Map<Row.GroupRow, List<Row>> children = new HashMap<>();
     private Grid.Column<Row> dateColumn;
+    private boolean adjustingDateSort; // re-entrancy guard while swapping the date null policy
     private List<Grid.Column<Row>> columnOrder; // current left-to-right order, for persistence
 
     // Auto-mark-read: RSSOwl marks the displayed article read after a short delay. A single shared
@@ -626,8 +628,8 @@ public class HeadlinesView extends Div {
                     return "";
                 })
                 .setHeader("Date").setKey("date").setWidth("160px").setFlexGrow(0).setResizable(true)
-                .setComparator(rowCmp(Comparator.comparing(NewsItem::date,
-                        Comparator.nullsLast(Comparator.naturalOrder())))).setSortable(true);
+                .setSortable(true);
+        applyDateNullPolicy(true); // default view is date DESC — keep undated rows last, not first
 
         headlines.addComponentColumn(row -> row instanceof Row.ItemRow ir ? readToggle(ir) : new Span())
                 .setHeader("").setKey("read").setWidth("46px").setFlexGrow(0);
@@ -666,7 +668,45 @@ public class HeadlinesView extends Div {
         });
         headlines.addColumnResizeListener(e -> persistColumnLayout());
 
+        // Direction-aware null handling for the Date column: when the user flips to ascending/descending,
+        // swap the null policy so undated rows stay at the bottom in BOTH directions (see applyDateNullPolicy).
+        headlines.addSortListener(e -> {
+            if (adjustingDateSort) return;
+            e.getSortOrder().stream().filter(so -> so.getSorted() == dateColumn).findFirst().ifPresent(so -> {
+                adjustingDateSort = true;
+                try {
+                    applyDateNullPolicy(so.getDirection() == SortDirection.DESCENDING);
+                    headlines.getDataProvider().refreshAll(); // re-sort with the adjusted comparator
+                } finally {
+                    adjustingDateSort = false;
+                }
+            });
+        });
+
         buildContextMenu();
+    }
+
+    /**
+     * Pin undated rows to the BOTTOM regardless of sort direction. RSSOwl's {@code NewsComparator} is
+     * direction-aware and does this directly; Vaadin instead <em>reverses the whole column comparator</em>
+     * for a descending sort, which would flip {@code nullsLast} into {@code nullsFirst} (undated rows
+     * jumping to the top — the bug noted earlier). So for a descending sort we hand Vaadin a
+     * <em>nulls-first</em> comparator: after Vaadin reverses it, the nulls land last and the dates run
+     * newest-first.
+     */
+    private void applyDateNullPolicy(boolean descending) {
+        dateColumn.setComparator(rowCmp(dateItemComparator(descending)));
+    }
+
+    /**
+     * The date comparator handed to the grid for the given direction. Ascending → nulls last (as-is).
+     * Descending → nulls FIRST, because the grid reverses this comparator for a descending sort, so the
+     * reversed result places nulls last with newest dates first. Package-private + static for testing.
+     */
+    static Comparator<NewsItem> dateItemComparator(boolean descending) {
+        return Comparator.comparing(NewsItem::date, descending
+                ? Comparator.nullsFirst(Comparator.naturalOrder())
+                : Comparator.nullsLast(Comparator.naturalOrder()));
     }
 
     /** Snapshot the current column order/width/visibility and persist it for this user. */
@@ -731,6 +771,7 @@ public class HeadlinesView extends Div {
             headlines.expandRecursively(roots, 1);
         }
         if (dateColumn != null) {
+            applyDateNullPolicy(true); // forced default = date DESC, undated rows last
             headlines.sort(GridSortOrder.desc(dateColumn).build());
         }
     }
