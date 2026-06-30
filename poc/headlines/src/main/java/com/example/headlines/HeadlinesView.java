@@ -152,6 +152,10 @@ public class HeadlinesView extends Div {
         // First login for this user? Seed their default subscriptions, then load their headlines.
         news.ensureSeeded(subject);
 
+        // Run the user's news filters over their news on open (RSSOwl applies filters as news arrives);
+        // actions are additive/idempotent so this never undoes a manual change.
+        news.applyFilters(subject);
+
         setSizeFull();
         this.allItems = news.newsItems(subject);
         this.currentItems = allItems;
@@ -669,6 +673,11 @@ public class HeadlinesView extends Div {
         addColumnToggle(cols, "feed", "Feed");
         addColumnToggle(cols, "date", "Date");
 
+        // News filters (RSSOwl's rules engine: match conditions → actions).
+        Button filters = new Button("Filters", VaadinIcon.FILTER.create(),
+                e -> new FiltersDialog(news, subject, this::reloadUserData).open());
+        filters.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+
         // Auto-mark-read toggle (RSSOwl marks the displayed article read after a short delay).
         Checkbox autoRead = new Checkbox("Mark read after viewing");
         autoRead.setValue(autoReadEnabled);
@@ -685,7 +694,7 @@ public class HeadlinesView extends Div {
         Button logout = new Button("Log out", e -> authContext.logout());
         logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
 
-        HorizontalLayout bar = new HorizontalLayout(groupBy, search, columnsMenu, autoRead, who, logout);
+        HorizontalLayout bar = new HorizontalLayout(groupBy, search, columnsMenu, filters, autoRead, who, logout);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
         bar.setFlexGrow(1, who); // push logout to the right

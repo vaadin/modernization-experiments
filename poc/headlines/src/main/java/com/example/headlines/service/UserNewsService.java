@@ -51,6 +51,12 @@ public class UserNewsService {
      *  column is left to flex/auto-size. */
     public record ColumnState(String key, int position, String width, boolean visible) {}
 
+    /** A news filter, detached from JPA for the view: its rules and actions. {@code id} is null for a
+     *  not-yet-saved filter. */
+    public record FilterDef(Long id, String name, boolean enabled,
+            com.example.headlines.data.NewsFilter.MatchMode matchMode,
+            List<com.example.headlines.data.NewsFilter.Condition> conditions, List<String> actions) {}
+
     private final FeedRepository feeds;
     private final ArticleRepository articles;
     private final SubscriptionRepository subscriptions;
@@ -58,6 +64,7 @@ public class UserNewsService {
     private final com.example.headlines.data.FolderPrefRepository folderPrefs;
     private final com.example.headlines.data.ColumnPrefRepository columnPrefs;
     private final com.example.headlines.data.UserStateRepository userStates;
+    private final com.example.headlines.data.NewsFilterRepository newsFilters;
     private final ArticleSearch articleSearch;
 
     public UserNewsService(FeedRepository feeds, ArticleRepository articles,
@@ -65,6 +72,7 @@ public class UserNewsService {
             com.example.headlines.data.FolderPrefRepository folderPrefs,
             com.example.headlines.data.ColumnPrefRepository columnPrefs,
             com.example.headlines.data.UserStateRepository userStates,
+            com.example.headlines.data.NewsFilterRepository newsFilters,
             ArticleSearch articleSearch) {
         this.feeds = feeds;
         this.articles = articles;
@@ -73,6 +81,7 @@ public class UserNewsService {
         this.folderPrefs = folderPrefs;
         this.columnPrefs = columnPrefs;
         this.userStates = userStates;
+        this.newsFilters = newsFilters;
         this.articleSearch = articleSearch;
     }
 
@@ -177,6 +186,77 @@ public class UserNewsService {
             out.add(item);
         }
         return out;
+    }
+
+    // --- news filters (RSSOwl's rules engine: match conditions -> actions), per user ---
+
+    /** The user's filters, in order, as detached DTOs. */
+    @Transactional(readOnly = true)
+    public List<FilterDef> filters(String subject) {
+        return newsFilters.findByOwnerOrderByPositionAsc(subject).stream()
+                .map(f -> new FilterDef(f.getId(), f.getName(), f.isEnabled(), f.getMatchMode(),
+                        new ArrayList<>(f.getConditions()), new ArrayList<>(f.getActions())))
+                .toList();
+    }
+
+    /** Create or update a filter for the user (owner enforced). Returns the saved id. */
+    @Transactional
+    public long saveFilter(String subject, FilterDef def) {
+        com.example.headlines.data.NewsFilter f;
+        if (def.id() == null) {
+            f = new com.example.headlines.data.NewsFilter(subject, def.name());
+            f.setPosition(newsFilters.findByOwnerOrderByPositionAsc(subject).size());
+        } else {
+            f = newsFilters.findById(def.id()).filter(x -> x.getOwner().equals(subject)).orElseThrow();
+            f.setName(def.name());
+        }
+        f.setEnabled(def.enabled());
+        f.setMatchMode(def.matchMode());
+        // Rebuild the collections with fresh instances (don't share references across entities).
+        List<com.example.headlines.data.NewsFilter.Condition> conds = new ArrayList<>();
+        for (var c : def.conditions()) {
+            if (c.getValue() != null && !c.getValue().isBlank()) {
+                conds.add(new com.example.headlines.data.NewsFilter.Condition(c.getField(), c.getValue().trim()));
+            }
+        }
+        f.setConditions(conds);
+        f.setActions(new ArrayList<>(def.actions()));
+        return newsFilters.save(f).getId();
+    }
+
+    @Transactional
+    public void deleteFilter(String subject, long filterId) {
+        newsFilters.findById(filterId).filter(f -> f.getOwner().equals(subject)).ifPresent(newsFilters::delete);
+    }
+
+    /**
+     * Run the user's enabled filters over their current news and apply matching actions — RSSOwl's
+     * filter behaviour. Actions are <b>additive/idempotent</b>: mark-read never un-reads, make-sticky
+     * never un-stickies, label only changes a differing label, so re-running (or auto-run on open) never
+     * thrashes a user's manual choices. Returns the number of actions actually applied.
+     */
+    @Transactional
+    public int applyFilters(String subject) {
+        List<com.example.headlines.data.NewsFilter> active = newsFilters.findByOwnerOrderByPositionAsc(subject)
+                .stream().filter(com.example.headlines.data.NewsFilter::isEnabled).toList();
+        if (active.isEmpty()) return 0;
+        int applied = 0;
+        for (NewsItem item : newsItems(subject)) {
+            for (com.example.headlines.data.NewsFilter f : active) {
+                if (!FilterEngine.matches(f, item)) continue;
+                for (String action : f.getActions()) {
+                    if ("MARK_READ".equals(action) && item.unread()) {
+                        setRead(subject, item.id(), true); applied++;
+                    } else if ("MARK_STICKY".equals(action) && !item.sticky()) {
+                        setSticky(subject, item.id(), true); applied++;
+                    } else if (action.startsWith("LABEL:")) {
+                        String color = action.substring("LABEL:".length());
+                        if (!color.equals(item.labelColor())) { setLabel(subject, item.id(), color); applied++; }
+                    }
+                }
+            }
+        }
+        return applied;
     }
 
     // --- per-article state mutations (lazy upsert: a row is created only when state diverges) ---

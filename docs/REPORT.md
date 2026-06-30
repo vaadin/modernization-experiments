@@ -700,9 +700,11 @@ zero-install web). But RSSOwl the *application* still has whole subsystems we de
 build: news filters/actions, notifications, OPML import/export UI, scheduled per-feed refresh, keyboard
 navigation, news bins, and sync. Labels are a basic single-colour-per-item subset (no label CRUD /
 multi-label). Faithful on the slice; a fraction of the
-whole app — exactly the honest scope this experiment set out to measure. _(Update, Day 7: the
-embedded-browser article rendering gap is now largely closed — the reader renders each article's feed
-HTML inline; see below.)_
+whole app — exactly the honest scope this experiment set out to measure. _(Update, Days 7–14: much of
+this list was subsequently built — inline article rendering (Day 7), Lucene full-text search (Day 9),
+OPML import/export UI (Day 10), notifications (Days 11/13), scheduled refresh (Day 12), and the news
+filters/actions rules engine (Day 14). Still genuinely absent: news bins, label CRUD/multi-label, and
+sync (a dead API). See the per-day sections below.)_
 
 **A clarification worth recording (it was nearly mis-stated as a finding).** RSSOwl is *not* "mostly
 SWT scaffolding" — SWT isn't even in its 121k lines (it's an external Eclipse dependency); its own
@@ -962,6 +964,35 @@ tree + grid.
 
 With this, the notifications feature matches RSSOwl's shape: a popup when a refresh brings in new news,
 both between visits and live while you watch.
+
+### Day 14 — news filters / actions (the rules engine)
+
+The biggest remaining RSSOwl feature: a **rules engine**. A filter is a name + match conditions
+(*field* `contains` *value*, over Title/Author/Feed/Content, combined ALL/AND or ANY/OR) + additive
+actions (mark read, make sticky, assign label). Filters are per-user, managed in a Filters dialog
+(list / add / edit / delete / enable / **Apply now**), and auto-applied on open — RSSOwl runs filters as
+news arrives.
+
+- **Matching is a pure, unit-tested function** (`FilterEngine.matches`) kept free of JPA/Spring; the
+  apply step (`UserNewsService.applyFilters`) walks the user's news and applies actions through the same
+  per-user state methods as the manual toggles, so it's **owner-isolated** and **additive/idempotent**
+  (mark-read never un-reads; re-running or auto-apply-on-open never thrashes a manual change). Six tests
+  cover field matching, ALL/ANY, the empty-filter guard, apply, idempotency, and per-user isolation.
+- **Verified end-to-end in the browser:** created *"Kernel to read"* (Title contains "kernel" → Mark
+  read) in the editor, saved (DB shows the filter + condition + action rows), clicked **Apply now** —
+  all **5** kernel-titled articles became read for alice, none for bob. **51 tests green.**
+
+![The news-filter rules dialog with a saved "Title contains kernel → mark read" filter](after/filters.png)
+
+- **A real bug the run caught — H2 reserved word.** The first build saved nothing: the condition
+  collection table has a `value` column, and `VALUE` is **reserved in H2**, so Hibernate's
+  `ddl-auto=update` *silently failed to create the table* (the sibling `action` table, no reserved
+  column, was created fine) and every save rolled back with "table not found". Fixed by mapping the
+  column to `match_value`. A reminder that `ddl-auto=update` swallows DDL failures — and that reserved
+  words bite raw/embedded column names (cf. the same `VALUE` trap when querying via the H2 shell).
+- **Honest scope:** conditions are `contains` only (no age/state/regex operators), and actions are the
+  three that map to per-user state (no move-to-bin/delete — we have no bins). It's a faithful, working
+  subset of RSSOwl's filter system, not the whole thing.
 
 ## Honest findings so far
 

@@ -56,6 +56,7 @@ class UserNewsServiceTest {
     @Autowired com.example.headlines.data.FolderPrefRepository folderPrefs;
     @Autowired com.example.headlines.data.ColumnPrefRepository columnPrefs;
     @Autowired com.example.headlines.data.UserStateRepository userStates;
+    @Autowired com.example.headlines.data.NewsFilterRepository newsFilters;
 
     private UserNewsService svc;
     // Stub full-text search: returns a fixed set of article IDs, so search() scoping is testable
@@ -66,7 +67,7 @@ class UserNewsServiceTest {
     void setUp() {
         ArticleSearch fakeSearch = (q, limit) -> List.copyOf(searchHits);
         svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs, columnPrefs,
-                userStates, fakeSearch);
+                userStates, newsFilters, fakeSearch);
     }
 
     @Test
@@ -178,6 +179,49 @@ class UserNewsServiceTest {
         List<UserNewsService.FeedRef> refs = svc.feedRefs(ALICE);
         assertEquals(List.of("B", "A"), refs.stream().map(UserNewsService.FeedRef::title).toList());
         assertTrue(refs.stream().allMatch(r -> "News".equals(r.folder())));
+    }
+
+    @Test
+    void applyFiltersActionsMatchingItemsAndIsPerUser() {
+        Feed f = feeds.save(new Feed("https://feed", "F", null));
+        Article linux = articles.save(new Article(f, null, "https://x/1", "Linux kernel 6.14", "a", LocalDateTime.now(), false));
+        Article food = articles.save(new Article(f, null, "https://x/2", "Best pasta recipe", "a", LocalDateTime.now(), false));
+        subscriptions.save(new Subscription(ALICE, f, null, 0));
+        subscriptions.save(new Subscription(BOB, f, null, 0));
+
+        // Alice's filter: Title contains "linux" -> mark read.
+        var def = new UserNewsService.FilterDef(null, "Linux→read", true,
+                com.example.headlines.data.NewsFilter.MatchMode.ALL,
+                List.of(new com.example.headlines.data.NewsFilter.Condition(
+                        com.example.headlines.data.NewsFilter.Field.TITLE, "linux")),
+                List.of("MARK_READ"));
+        svc.saveFilter(ALICE, def);
+
+        int applied = svc.applyFilters(ALICE);
+        assertEquals(1, applied, "only the matching article is actioned");
+
+        var aliceByTitle = svc.newsItems(ALICE).stream()
+                .collect(java.util.stream.Collectors.toMap(NewsItem::title, n -> n));
+        assertFalse(aliceByTitle.get("Linux kernel 6.14").unread(), "matched item marked read");
+        assertTrue(aliceByTitle.get("Best pasta recipe").unread(), "non-matching item untouched");
+
+        // Bob has no such filter and shares the feed — his state is unaffected (per-user isolation).
+        assertTrue(svc.newsItems(BOB).stream().allMatch(NewsItem::unread), "bob's items all still unread");
+    }
+
+    @Test
+    void applyFiltersIsIdempotent() {
+        Feed f = feeds.save(new Feed("https://feed", "F", null));
+        articles.save(new Article(f, null, "https://x/1", "Linux kernel", "a", LocalDateTime.now(), false));
+        subscriptions.save(new Subscription(ALICE, f, null, 0));
+        svc.saveFilter(ALICE, new UserNewsService.FilterDef(null, "f", true,
+                com.example.headlines.data.NewsFilter.MatchMode.ALL,
+                List.of(new com.example.headlines.data.NewsFilter.Condition(
+                        com.example.headlines.data.NewsFilter.Field.TITLE, "linux")),
+                List.of("MARK_READ")));
+
+        assertEquals(1, svc.applyFilters(ALICE), "first run marks it read");
+        assertEquals(0, svc.applyFilters(ALICE), "second run is a no-op (additive/idempotent)");
     }
 
     @Test
