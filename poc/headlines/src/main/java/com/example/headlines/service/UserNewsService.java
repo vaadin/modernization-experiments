@@ -57,17 +57,20 @@ public class UserNewsService {
     private final ArticleStateRepository states;
     private final com.example.headlines.data.FolderPrefRepository folderPrefs;
     private final com.example.headlines.data.ColumnPrefRepository columnPrefs;
+    private final ArticleSearch articleSearch;
 
     public UserNewsService(FeedRepository feeds, ArticleRepository articles,
             SubscriptionRepository subscriptions, ArticleStateRepository states,
             com.example.headlines.data.FolderPrefRepository folderPrefs,
-            com.example.headlines.data.ColumnPrefRepository columnPrefs) {
+            com.example.headlines.data.ColumnPrefRepository columnPrefs,
+            ArticleSearch articleSearch) {
         this.feeds = feeds;
         this.articles = articles;
         this.subscriptions = subscriptions;
         this.states = states;
         this.folderPrefs = folderPrefs;
         this.columnPrefs = columnPrefs;
+        this.articleSearch = articleSearch;
     }
 
     /** First-login bootstrap: give a brand-new user the default subscription set (from default_feeds.xml). */
@@ -116,6 +119,43 @@ public class UserNewsService {
                 item.setContent(a.getContent());
                 out.add(item);
             }
+        }
+        return out;
+    }
+
+    /**
+     * Full-text search across the whole archive (title + body + author), Lucene-ranked, then merged
+     * with this user's read/sticky/label state. <b>Security:</b> results are scoped to what the user may
+     * see — public articles (owner null) plus their own private ones — so a query never surfaces another
+     * user's private content, even if it matches.
+     */
+    @Transactional(readOnly = true)
+    public List<NewsItem> search(String subject, String query) {
+        List<Long> ranked = articleSearch.searchIds(query, 200);
+        if (ranked.isEmpty()) return List.of();
+
+        Map<Long, ArticleState> stateByArticle = states.findByOwner(subject).stream()
+                .collect(Collectors.toMap(st -> st.getArticle().getId(), Function.identity(), (a, b) -> a));
+        Map<Long, Article> byId = articles.findAllById(ranked).stream()
+                .collect(Collectors.toMap(Article::getId, Function.identity(), (a, b) -> a));
+
+        List<NewsItem> out = new ArrayList<>();
+        for (Long id : ranked) { // keep Lucene relevance order
+            Article a = byId.get(id);
+            if (a == null) continue;
+            String owner = a.getOwner();
+            if (owner != null && !owner.equals(subject)) continue; // never another user's private article
+            ArticleState st = stateByArticle.get(id);
+            boolean read = st != null && st.isRead();
+            boolean sticky = st != null && st.isSticky();
+            String label = st != null ? st.getLabelColor() : null;
+            String cat = a.getFeed().getDefaultCategory();
+            NewsItem item = new NewsItem(a.getId(), a.getTitle(), a.getAuthor(),
+                    (cat == null || cat.isBlank()) ? "Uncategorized" : cat, a.getFeed().getTitle(),
+                    a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, label,
+                    a.getLink(), a.isAttachments());
+            item.setContent(a.getContent());
+            out.add(item);
         }
         return out;
     }

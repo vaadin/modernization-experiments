@@ -60,15 +60,17 @@ public class FeedFetchService {
 
     private final FeedRepository feeds;
     private final ArticleRepository articles;
+    private final ArticleSearchService search;
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
-    public FeedFetchService(FeedRepository feeds, ArticleRepository articles) {
+    public FeedFetchService(FeedRepository feeds, ArticleRepository articles, ArticleSearchService search) {
         this.feeds = feeds;
         this.articles = articles;
+        this.search = search;
     }
 
     private record Raw(String link, String title, String author, LocalDateTime date, boolean attachments,
@@ -77,6 +79,7 @@ public class FeedFetchService {
     @PostConstruct
     void init() {
         seedFeedsIfEmpty();
+        search.ensureIndex(); // set up the full-text index + trigger BEFORE articles are inserted
         // The bundled defaults are RSSOwl's 2009 tree — ~292 feeds, most of them long dead. Fetching
         // them synchronously would stall startup on connect timeouts, so refresh in the background:
         // the app (and the feeds tree) come up immediately and article counts fill in as feeds resolve.
@@ -209,6 +212,7 @@ public class FeedFetchService {
             if (!exists) {
                 Article a = new Article(feed, owner, r.link(), r.title(), r.author(), r.date(), r.attachments());
                 a.setContent(r.content());
+                a.setContentText(com.example.headlines.ArticleHtml.toPlainText(r.content())); // for the FT index
                 articles.save(a);
                 saved++;
             }

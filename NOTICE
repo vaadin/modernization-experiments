@@ -37,3 +37,5 @@ Vaadin Flow                Apache License 2.0 (core) — https://vaadin.com
 Spring Boot                 Apache License 2.0
 ROME (com.rometools:rome)   Apache License 2.0 — RSS/Atom parsing
 jsoup (org.jsoup:jsoup)     MIT License — HTML sanitization for the reader
+Apache Lucene               Apache License 2.0 — full-text search (via H2 FullTextLucene)
+H2 Database                 EPL 1.0 / MPL 2.0 — embedded database + full-text engine

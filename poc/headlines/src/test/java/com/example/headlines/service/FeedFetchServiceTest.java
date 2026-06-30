@@ -50,7 +50,7 @@ class FeedFetchServiceTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        svc = new FeedFetchService(feeds, articles);
+        svc = new FeedFetchService(feeds, articles, new ArticleSearchService(null));
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/feed", ex -> {
             byte[] body = rss(itemCount).getBytes(StandardCharsets.UTF_8);

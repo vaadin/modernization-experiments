@@ -697,10 +697,9 @@ tree → sortable/groupable headlines → reader, with read/sticky, **per-user l
 search**, retention cap, smart folders, drag-reorder of channels *and* folders, add/unsubscribe,
 per-feed auth) and we added what the desktop app lacks (multi-user, Keycloak SSO, per-user isolation,
 zero-install web). But RSSOwl the *application* still has whole subsystems we deliberately didn't
-build: **full-text (Lucene) search** with saved-search criteria (ours is a live substring filter over
-the loaded headlines, not an index), news filters/actions, notifications, OPML import/export UI,
-scheduled per-feed refresh, keyboard navigation, news bins, and sync. Labels are a basic
-single-colour-per-item subset (no label CRUD / multi-label). Faithful on the slice; a fraction of the
+build: news filters/actions, notifications, OPML import/export UI, scheduled per-feed refresh, keyboard
+navigation, news bins, and sync. Labels are a basic single-colour-per-item subset (no label CRUD /
+multi-label). Faithful on the slice; a fraction of the
 whole app — exactly the honest scope this experiment set out to measure. _(Update, Day 7: the
 embedded-browser article rendering gap is now largely closed — the reader renders each article's feed
 HTML inline; see below.)_
@@ -835,8 +834,8 @@ descending → newest first, undated still last. **41 tests green.**
 Honest note: this is a *workaround for a framework default*, not a Vaadin shortcoming per se — but it's
 exactly the kind of subtle behavioural fidelity that a naïve port gets wrong and only a reviewer who
 knows the original would catch. With this, every in-slice stretch item from the original plan is done;
-the remaining gaps (Lucene full-text, filters/actions, notifications, OPML-UI, news bins, sync) are
-whole out-of-slice subsystems.
+the remaining gaps (filters/actions, notifications, OPML-UI, news bins, sync) are whole out-of-slice
+subsystems.
 
 What this took, and the honest caveats:
 - **The folder model had to grow from flat to nested.** Subscriptions store a folder *path*
@@ -854,6 +853,40 @@ What this took, and the honest caveats:
 - **Trade-off accepted:** folder **drag-reorder** is preserved only at the top level (it overrides OPML
   order there); sub-folders always render in OPML order. Fine for a faithful default view; full
   nested-reorder persistence wasn't worth the scope.
+
+### Day 9 — full-text search (Lucene), and a four-bug debugging trail
+
+Replaced the toolbar's substring filter with **real Lucene full-text search** — the feature RSSOwl
+bundles Lucene for. The search box now queries the **whole archive** (title + article body + author),
+relevance-ranked, with Lucene syntax (phrases `"..."`, boolean `AND/OR/NOT`, field-scoped `title:...`).
+We get Lucene without a bespoke integration by using **H2's `FullTextLucene`** over the `ARTICLE` table,
+supplying Lucene 9.x (H2 ships only the glue). Results are owner-scoped in `UserNewsService.search` so a
+query can never surface another user's private article (unit-tested).
+
+![Full-text search for "kernel" — body matches like security articles, ranked, across the whole archive](after/search-fulltext.png)
+
+The interesting part was the debugging. The first cut compiled and the index "built," but searching
+returned **0 results**. Four distinct bugs, peeled one at a time by *running it and reading the logs*:
+1. **Indexing raw HTML breaks Lucene.** A single unbroken run over 32,766 bytes (a `data:` URI in the
+   body) exceeds Lucene's max term length and fails the whole document. Fix: index a **plain-text
+   projection** (`content_text`, HTML stripped via jsoup), not the raw `content`.
+2. **Wrong column name.** I indexed `CONTENTTEXT`; the JPA naming strategy had created `CONTENT_TEXT`
+   (snake_case). H2 didn't error on the bad name — it just indexed nothing. Verified via
+   `INFORMATION_SCHEMA`.
+3. **`KEYS` is a SQL array.** `FullTextLucene.searchData` returns the matched primary keys as a
+   `java.sql.Array` (not a bare `Object[]`); the extraction has to unwrap both forms.
+4. **The real blocker — the pooled connection.** `FullTextLucene` casts the JDBC connection to
+   `org.h2.jdbc.JdbcConnection`, but Spring hands out a **HikariProxyConnection** → `ClassCastException`
+   wrapped as the opaque "Error while indexing document". Fix: `connection.unwrap(JdbcConnection.class)`
+   before every FullText call.
+
+Verified end-to-end: searching `kernel` returns **23 hits** — matching the database exactly — including
+articles that match only in the **body** (e.g. "Hackers have a new way to disable Mac security
+software"), which the old title-only filter could never find. **43 tests green** (search owner-scoping
+and relevance-order are unit-tested with a stub index). Honest caveats: the FT index is rebuilt at
+startup over the existing rows (the pool-connection constraint makes a server-managed live index
+fiddlier), and the corpus is still RSSOwl's mostly-dead 2009 feeds, so live hits are limited to the
+feeds that still resolve.
 
 ## Honest findings so far
 

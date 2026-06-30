@@ -28,6 +28,7 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,10 +57,14 @@ class UserNewsServiceTest {
     @Autowired com.example.headlines.data.ColumnPrefRepository columnPrefs;
 
     private UserNewsService svc;
+    // Stub full-text search: returns a fixed set of article IDs, so search() scoping is testable
+    // without standing up the Lucene index.
+    private final List<Long> searchHits = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
-        svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs, columnPrefs);
+        ArticleSearch fakeSearch = (q, limit) -> List.copyOf(searchHits);
+        svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs, columnPrefs, fakeSearch);
     }
 
     @Test
@@ -171,6 +176,33 @@ class UserNewsServiceTest {
         List<UserNewsService.FeedRef> refs = svc.feedRefs(ALICE);
         assertEquals(List.of("B", "A"), refs.stream().map(UserNewsService.FeedRef::title).toList());
         assertTrue(refs.stream().allMatch(r -> "News".equals(r.folder())));
+    }
+
+    @Test
+    void searchIsScopedToOwner_neverLeaksAnotherUsersPrivateArticle() {
+        Feed f = feeds.save(new Feed("https://feed", "F", null));
+        Article pub = articles.save(new Article(f, null, "https://x/pub", "Public hit", "a", LocalDateTime.now(), false));
+        Article alicePriv = articles.save(new Article(f, ALICE, "https://x/ap", "Alice hit", "a", LocalDateTime.now(), false));
+        Article bobPriv = articles.save(new Article(f, BOB, "https://x/bp", "Bob hit", "a", LocalDateTime.now(), false));
+
+        // The (stubbed) index matches all three; scoping must drop bob's private article for alice.
+        searchHits.addAll(List.of(pub.getId(), alicePriv.getId(), bobPriv.getId()));
+
+        List<String> titles = svc.search(ALICE, "hit").stream().map(NewsItem::title).toList();
+        assertTrue(titles.contains("Public hit"), "public article is searchable");
+        assertTrue(titles.contains("Alice hit"), "alice finds her own private article");
+        assertFalse(titles.contains("Bob hit"), "alice must NOT find bob's private article");
+    }
+
+    @Test
+    void searchPreservesRelevanceOrderOfTheIndex() {
+        Feed f = feeds.save(new Feed("https://feed", "F", null));
+        Article a1 = articles.save(new Article(f, null, "https://x/1", "first", "a", LocalDateTime.now(), false));
+        Article a2 = articles.save(new Article(f, null, "https://x/2", "second", "a", LocalDateTime.now(), false));
+        searchHits.addAll(List.of(a2.getId(), a1.getId())); // index ranks a2 before a1
+
+        assertEquals(List.of("second", "first"),
+                svc.search(ALICE, "x").stream().map(NewsItem::title).toList(), "Lucene rank order kept");
     }
 
     @Test

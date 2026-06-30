@@ -540,7 +540,7 @@ public class HeadlinesView extends Div {
 
         // Live headline search (title / author / feed), narrowing the current selection.
         TextField search = new TextField();
-        search.setPlaceholder("Search headlines…");
+        search.setPlaceholder("Search all articles…");
         search.setClearButtonVisible(true);
         search.setValueChangeMode(com.vaadin.flow.data.value.ValueChangeMode.LAZY);
         search.setPrefixComponent(VaadinIcon.SEARCH.create());
@@ -995,18 +995,17 @@ public class HeadlinesView extends Div {
         };
     }
 
-    /** The items currently shown: the feed/folder selection, narrowed by the search box (if any). */
+    /**
+     * The items currently shown. With no search term, it's the feed/folder selection. With a term, it's
+     * a Lucene full-text search across the user's <em>whole</em> archive — title, body and author, ranked
+     * by relevance (RSSOwl-style: supports phrases {@code "..."}, boolean {@code AND/OR/NOT}, and
+     * field-scoped {@code title:...} queries) — so search reaches beyond the loaded selection.
+     */
     private List<NewsItem> displayedItems() {
         if (searchTerm.isBlank()) {
             return currentItems;
         }
-        String q = searchTerm.toLowerCase();
-        return currentItems.stream().filter(n -> contains(n.title(), q)
-                || contains(n.author(), q) || contains(n.feed(), q)).toList();
-    }
-
-    private static boolean contains(String s, String lowerQuery) {
-        return s != null && s.toLowerCase().contains(lowerQuery);
+        return news.search(subject, searchTerm);
     }
 
     private Comparator<Row> rowCmp(Comparator<NewsItem> itemCmp) {

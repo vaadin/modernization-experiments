@@ -36,4 +36,15 @@ public final class ArticleHtml {
         doc.select("a[href]").forEach(a -> a.attr("target", "_blank").attr("rel", "noopener noreferrer"));
         return doc.body().html();
     }
+
+    /**
+     * Strip {@code raw} HTML to plain visible text — used to build the full-text search index. Indexing
+     * raw HTML breaks Lucene: a single unbroken run over 32,766 bytes (a {@code data:} image URI, minified
+     * markup) exceeds Lucene's maximum term length and the whole document fails to index. Visible text
+     * tokenizes into ordinary words, so it indexes cleanly and searches better (no tag noise).
+     */
+    public static String toPlainText(String raw) {
+        if (raw == null || raw.isBlank()) return "";
+        return Jsoup.parse(raw).text();
+    }
 }

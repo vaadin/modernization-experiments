@@ -67,6 +67,11 @@ public class Article {
     @Lob
     private String content;
 
+    /** Plain-text projection of {@link #content} (HTML stripped), maintained only to feed the full-text
+     *  index — indexing raw HTML breaks Lucene's max-term-length. Not shown in the UI. */
+    @Lob
+    private String contentText;
+
     protected Article() { }
 
     public Article(Feed feed, String owner, String link, String title, String author,
@@ -90,4 +95,6 @@ public class Article {
     public boolean isAttachments() { return attachments; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+    public String getContentText() { return contentText; }
+    public void setContentText(String contentText) { this.contentText = contentText; }
 }
