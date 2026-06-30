@@ -67,9 +67,9 @@ _(Filled in as the experiment progresses.)_
 
 ## Deliverables
 
-- [ ] Runnable code in this repo with a reproducible README.
-- [ ] The AI prompts / skills / instructions used, included in the repo.
-- [ ] A write-up draft (the story + the honest findings) for the curator and marketing.
+- [x] Runnable code in this repo with a reproducible README.
+- [x] The AI prompts / skills / instructions used, included in the repo — see [`docs/PROMPTS.md`](docs/PROMPTS.md).
+- [x] A write-up draft (the story + the honest findings) for the curator and marketing — [`docs/REPORT.md`](docs/REPORT.md).
 - [ ] One clear call-to-action defined with marketing — ideally "run this on your own
       codebase" (repo + prompts) rather than "contact sales."
 
