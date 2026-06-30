@@ -28,6 +28,11 @@ import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.menubar.MenuBarVariant;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.notification.Notification;
+import com.vaadin.flow.component.notification.NotificationVariant;
+import com.vaadin.flow.component.upload.Upload;
+import com.vaadin.flow.server.streams.DownloadHandler;
+import com.vaadin.flow.server.streams.DownloadResponse;
+import com.vaadin.flow.server.streams.UploadHandler;
 import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
 import com.example.headlines.service.AuthenticationRequiredException;
@@ -166,10 +171,14 @@ public class HeadlinesView extends Div {
         right.setSplitterPosition(60);
         right.setSizeFull();
 
-        // left pane: an "Add feed" bar above the feeds tree
+        // left pane: an "Add feed / Import / Export" bar above the feeds tree
         Button addFeed = new Button("Add feed", VaadinIcon.PLUS.create(), e -> openAddFeedDialog());
         addFeed.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
-        HorizontalLayout feedBar = new HorizontalLayout(addFeed);
+        Button importOpml = new Button("Import", VaadinIcon.UPLOAD.create(), e -> openImportOpmlDialog());
+        importOpml.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+        Anchor exportOpml = buildOpmlExportLink();
+        HorizontalLayout feedBar = new HorizontalLayout(addFeed, importOpml, exportOpml);
+        feedBar.setAlignItems(FlexComponent.Alignment.CENTER);
         feedBar.getStyle().set("padding", "0.3rem 0.5rem");
         VerticalLayout leftPane = new VerticalLayout(feedBar, feedTree);
         leftPane.setSizeFull();
@@ -232,6 +241,61 @@ public class HeadlinesView extends Div {
                 .ifPresent(n -> openCredentialsDialog((FeedNode.Feed) n)));
         feedMenu.addItem("Unsubscribe", e -> e.getItem().ifPresent(this::unsubscribe));
         feedMenu.setDynamicContentHandler(node -> node instanceof FeedNode.Feed);
+    }
+
+    /** A download link that serves the user's current subscriptions as an OPML file (RSSOwl-style export). */
+    private Anchor buildOpmlExportLink() {
+        Anchor link = new Anchor(DownloadHandler.fromInputStream(event -> {
+            byte[] opml = news.exportOpml(subject).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            return new DownloadResponse(new java.io.ByteArrayInputStream(opml),
+                    "subscriptions.opml", "text/x-opml", opml.length);
+        }), "Export");
+        link.getStyle().set("font-size", "var(--lumo-font-size-s)").set("align-self", "center");
+        return link;
+    }
+
+    /** Import subscriptions from an uploaded OPML file (folders + feeds), like RSSOwl's import. */
+    private void openImportOpmlDialog() {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle("Import OPML");
+        Paragraph hint = new Paragraph("Upload an OPML file to add its feeds to your subscriptions. "
+                + "Feeds you're already subscribed to are skipped.");
+        hint.getStyle().set("color", "var(--vaadin-text-color-secondary, gray)");
+
+        Upload upload = new Upload(UploadHandler.inMemory((metadata, data) -> {
+            // Built-in handler invokes this on the UI thread, so UI updates here are safe.
+            try {
+                var sources = com.example.headlines.service.DefaultFeeds.parse(new java.io.ByteArrayInputStream(data));
+                List<String> newUrls = news.importSubscriptions(subject, sources);
+                reloadUserData();
+                int skipped = sources.size() - newUrls.size();
+                Notification.show("Imported " + newUrls.size() + " new feed(s)"
+                        + (skipped > 0 ? " (" + skipped + " already subscribed)" : ""));
+                dialog.close();
+                fetchInBackground(newUrls); // pull the new feeds' articles, then refresh the tree
+            } catch (Exception ex) {
+                Notification.show("Import failed: " + ex.getMessage())
+                        .addThemeVariants(NotificationVariant.ERROR);
+            }
+        }));
+        upload.setAcceptedFileTypes("text/x-opml", ".opml", ".xml", "text/xml", "application/xml");
+        upload.setMaxFiles(1);
+
+        dialog.add(new VerticalLayout(hint, upload));
+        dialog.getFooter().add(new Button("Close", e -> dialog.close()));
+        dialog.open();
+    }
+
+    /** Fetch the given feeds' articles off the UI thread, then refresh the tree via push. */
+    private void fetchInBackground(List<String> urls) {
+        if (urls.isEmpty()) return;
+        UI ui = UI.getCurrent();
+        Thread t = new Thread(() -> {
+            for (String url : urls) feedFetch.refreshPublic(url);
+            ui.access(this::reloadUserData);
+        }, "opml-import-fetch");
+        t.setDaemon(true);
+        t.start();
     }
 
     private void openAddFeedDialog() {

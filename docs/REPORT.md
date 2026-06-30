@@ -888,6 +888,22 @@ startup over the existing rows (the pool-connection constraint makes a server-ma
 fiddlier), and the corpus is still RSSOwl's mostly-dead 2009 feeds, so live hits are limited to the
 feeds that still resolve.
 
+### Day 10 — OPML import / export UI
+
+A quick, clean win: the feeds tree now has **Import** and **Export** next to "Add feed" — the
+subscription interchange every reader supports (and RSSOwl exports a `backup.opml` exactly this way).
+**Export** serves the user's subscriptions as a nested OPML download (`DownloadHandler.fromInputStream`
+→ a `DownloadResponse`); **Import** uploads an OPML (`Upload` + `UploadHandler.inMemory`), adds its feeds
+as new subscriptions (existing ones skipped), and fetches them on a background thread so articles appear
+without blocking. The OPML writer reuses the same folder-path model as the tree, so nesting round-trips;
+`DefaultFeeds.parse(InputStream)` (extracted from the default-feeds loader) reads any uploaded OPML.
+
+- **Verified in-browser:** Export downloaded a `text/x-opml` file with all **292 feeds / 31 folders**;
+  importing a small OPML added a **"My Imports"** folder with its feed and fetched 10 articles.
+- **Modern Vaadin file APIs, MCP-checked:** `Upload` in 25.1 uses an `UploadHandler` (not the old
+  `Receiver`), and downloads use `DownloadHandler`/`DownloadResponse` — the pre-25 APIs would not compile.
+  Round-trip (write → parse, incl. nested paths and `&`-escaping) is unit-tested. **44 tests green.**
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_

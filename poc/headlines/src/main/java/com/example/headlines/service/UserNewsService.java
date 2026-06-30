@@ -262,6 +262,28 @@ public class UserNewsService {
         s.setAuthPassword(has ? password : null);
     }
 
+    /** Export the user's subscriptions as an OPML document (folders + feeds), like RSSOwl's export. */
+    @Transactional(readOnly = true)
+    public String exportOpml(String subject) {
+        return Opml.write(feedRefs(subject));
+    }
+
+    /** Import OPML-declared feeds as new subscriptions for the user (folders preserved). Existing
+     *  subscriptions are skipped. Returns the URLs of feeds newly added, so the caller can fetch them. */
+    @Transactional
+    public List<String> importSubscriptions(String subject, List<DefaultFeeds.Source> sources) {
+        int pos = subscriptions.findByOwnerOrderByFolderAscPositionAsc(subject).size();
+        List<String> added = new ArrayList<>();
+        for (DefaultFeeds.Source s : sources) {
+            Feed feed = feeds.findByUrl(s.url()).orElseGet(() -> feeds.save(new Feed(s.url(), s.title(), s.category())));
+            if (subscriptions.findByOwnerAndFeed(subject, feed).isPresent()) continue; // already subscribed
+            String folder = "Uncategorized".equals(s.category()) ? null : s.category();
+            subscriptions.save(new Subscription(subject, feed, folder, pos++));
+            added.add(s.url());
+        }
+        return added;
+    }
+
     @Transactional
     public void removeSubscription(String subject, long subscriptionId) {
         subscriptions.findById(subscriptionId)

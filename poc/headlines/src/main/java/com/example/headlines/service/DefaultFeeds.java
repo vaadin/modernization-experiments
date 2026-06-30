@@ -44,22 +44,29 @@ public final class DefaultFeeds {
     private DefaultFeeds() {}
 
     public static List<Source> read() {
-        List<Source> sources = new ArrayList<>();
         try (InputStream in = DefaultFeeds.class.getResourceAsStream("/default_feeds.xml")) {
-            var factory = DocumentBuilderFactory.newInstance();
-            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-            var doc = factory.newDocumentBuilder().parse(in);
-            NodeList outlines = doc.getElementsByTagName("outline");
-            for (int i = 0; i < outlines.getLength(); i++) {
-                Element o = (Element) outlines.item(i);
-                String xmlUrl = o.getAttribute("xmlUrl");
-                if (xmlUrl == null || xmlUrl.isBlank()) continue; // a folder, not a feed
-                String title = firstNonBlank(o.getAttribute("title"), o.getAttribute("text"), "Feed");
-                String path = folderPathOf(o);
-                sources.add(new Source(title, path.isEmpty() ? "Uncategorized" : path, xmlUrl));
-            }
+            return parse(in);
         } catch (Exception e) {
             log.warn("Could not read default_feeds.xml: {}", e.toString());
+            return new ArrayList<>();
+        }
+    }
+
+    /** Parse any OPML stream (the bundled defaults or a user-uploaded file) into feed {@link Source}s,
+     *  each carrying its full folder path. The caller owns/closes the stream. */
+    public static List<Source> parse(InputStream in) throws Exception {
+        List<Source> sources = new ArrayList<>();
+        var factory = DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        var doc = factory.newDocumentBuilder().parse(in);
+        NodeList outlines = doc.getElementsByTagName("outline");
+        for (int i = 0; i < outlines.getLength(); i++) {
+            Element o = (Element) outlines.item(i);
+            String xmlUrl = o.getAttribute("xmlUrl");
+            if (xmlUrl == null || xmlUrl.isBlank()) continue; // a folder, not a feed
+            String title = firstNonBlank(o.getAttribute("title"), o.getAttribute("text"), "Feed");
+            String path = folderPathOf(o);
+            sources.add(new Source(title, path.isEmpty() ? "Uncategorized" : path, xmlUrl));
         }
         return sources;
     }
