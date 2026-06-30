@@ -16,10 +16,15 @@ import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
+import com.vaadin.flow.component.grid.Grid;
 import com.vaadin.flow.component.grid.GridSortOrder;
 import com.vaadin.flow.component.grid.GridVariant;
 import com.vaadin.flow.component.grid.contextmenu.GridContextMenu;
 import com.vaadin.flow.component.grid.contextmenu.GridMenuItem;
+import com.vaadin.flow.component.contextmenu.MenuItem;
+import com.vaadin.flow.component.contextmenu.SubMenu;
+import com.vaadin.flow.component.menubar.MenuBar;
+import com.vaadin.flow.component.menubar.MenuBarVariant;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.textfield.PasswordField;
@@ -99,7 +104,8 @@ public class HeadlinesView extends Div {
     private final TreeGrid<Row> headlines = new TreeGrid<>();
     private final ValueSignal<NewsItem> selected = new ValueSignal<NewsItem>((NewsItem) null);
     private final Map<Row.GroupRow, List<Row>> children = new HashMap<>();
-    private com.vaadin.flow.component.grid.Grid.Column<Row> dateColumn;
+    private Grid.Column<Row> dateColumn;
+    private List<Grid.Column<Row>> columnOrder; // current left-to-right order, for persistence
 
     private final UserNewsService news;
     private final FeedFetchService feedFetch;
@@ -125,6 +131,7 @@ public class HeadlinesView extends Div {
 
         configureFeedTree();
         configureHeadlines();
+        applyColumnPrefs(); // restore this user's saved column order/width/visibility
         applyGrouping(GroupBy.NONE);
 
         Div reader = buildReactiveReader();
@@ -465,18 +472,38 @@ public class HeadlinesView extends Div {
             applyGrouping(currentGroupBy);
         });
 
+        // Column visibility menu (RSSOwl lets you show/hide news columns). Title stays mandatory.
+        MenuBar columnsMenu = new MenuBar();
+        columnsMenu.addThemeVariants(MenuBarVariant.LUMO_TERTIARY, MenuBarVariant.LUMO_SMALL);
+        SubMenu cols = columnsMenu.addItem("Columns").getSubMenu();
+        addColumnToggle(cols, "author", "Author");
+        addColumnToggle(cols, "feed", "Feed");
+        addColumnToggle(cols, "date", "Date");
+
         // Signed-in identity + logout (multi-user: proves whose data this is).
         Span who = new Span("Signed in as " + displayName);
         who.getStyle().set("align-self", "center").set("color", "var(--vaadin-text-color-secondary, #666)");
         Button logout = new Button("Log out", e -> authContext.logout());
         logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
 
-        HorizontalLayout bar = new HorizontalLayout(groupBy, search, who, logout);
+        HorizontalLayout bar = new HorizontalLayout(groupBy, search, columnsMenu, who, logout);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
         bar.setFlexGrow(1, who); // push logout to the right
         bar.getStyle().set("padding", "0.4rem 1rem");
         return bar;
+    }
+
+    /** A checkable "show this column" item that toggles visibility and persists the layout. */
+    private void addColumnToggle(SubMenu menu, String key, String label) {
+        Grid.Column<Row> col = headlines.getColumnByKey(key);
+        MenuItem item = menu.addItem(label, e -> {
+            col.setVisible(e.getSource().isChecked());
+            persistColumnLayout();
+        });
+        item.setCheckable(true);
+        item.setChecked(col.isVisible()); // reflects any state already restored by applyColumnPrefs()
+        item.setKeepOpen(true);           // let the user toggle several without reopening the menu
     }
 
     // --- top-right pane: headlines ---
@@ -491,17 +518,17 @@ public class HeadlinesView extends Div {
                 .setComparator(rowCmp(Comparator.comparingInt(NewsItem::statusRank))).setSortable(true);
 
         headlines.addComponentHierarchyColumn(this::titleComponent)
-                .setHeader("Title").setKey("title").setFlexGrow(3)
+                .setHeader("Title").setKey("title").setFlexGrow(3).setResizable(true)
                 .setComparator(rowCmp(Comparator.comparing(NewsItem::title, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
         headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().author() : "")
-                .setHeader("Author").setKey("author").setFlexGrow(1)
+                .setHeader("Author").setKey("author").setFlexGrow(1).setResizable(true)
                 .setComparator(rowCmp(Comparator.comparing(NewsItem::author, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
         headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().feed() : "")
-                .setHeader("Feed").setKey("feed").setFlexGrow(1)
+                .setHeader("Feed").setKey("feed").setFlexGrow(1).setResizable(true)
                 .setComparator(rowCmp(Comparator.comparing(NewsItem::feed, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
@@ -511,7 +538,7 @@ public class HeadlinesView extends Div {
                     }
                     return "";
                 })
-                .setHeader("Date").setKey("date").setWidth("160px").setFlexGrow(0)
+                .setHeader("Date").setKey("date").setWidth("160px").setFlexGrow(0).setResizable(true)
                 .setComparator(rowCmp(Comparator.comparing(NewsItem::date,
                         Comparator.nullsLast(Comparator.naturalOrder())))).setSortable(true);
 
@@ -536,7 +563,58 @@ public class HeadlinesView extends Div {
             if (e.getItem() instanceof Row.ItemRow ir) openLink(ir.news());
         });
 
+        // Column customisation (RSSOwl persists per-column order/width/visibility): let the user
+        // drag column headers to reorder and drag header edges to resize; persist either change.
+        headlines.setColumnReorderingAllowed(true);
+        columnOrder = new ArrayList<>(headlines.getColumns());
+        headlines.addColumnReorderListener(e -> {
+            columnOrder = new ArrayList<>(e.getColumns());
+            persistColumnLayout();
+        });
+        headlines.addColumnResizeListener(e -> persistColumnLayout());
+
         buildContextMenu();
+    }
+
+    /** Snapshot the current column order/width/visibility and persist it for this user. */
+    private void persistColumnLayout() {
+        List<UserNewsService.ColumnState> states = new ArrayList<>();
+        int pos = 0;
+        for (Grid.Column<Row> c : columnOrder) {
+            if (c.getKey() == null) continue;
+            states.add(new UserNewsService.ColumnState(c.getKey(), pos++, c.getWidth(), c.isVisible()));
+        }
+        news.saveColumnLayout(subject, states);
+    }
+
+    /** Restore this user's saved column order/width/visibility (no-op on first use). */
+    private void applyColumnPrefs() {
+        List<UserNewsService.ColumnState> prefs = news.columnPrefs(subject);
+        if (prefs.isEmpty()) return;
+
+        // Width + visibility per column.
+        for (UserNewsService.ColumnState cs : prefs) {
+            Grid.Column<Row> c = headlines.getColumnByKey(cs.key());
+            if (c == null) continue; // a column that no longer exists — ignore
+            if (cs.width() != null) {
+                c.setWidth(cs.width());
+                c.setFlexGrow(0); // a saved (resized) width is fixed, like RSSOwl
+            }
+            c.setVisible(cs.visible());
+        }
+
+        // Order: saved columns first (in saved order), then any newer columns not yet saved.
+        // setColumnOrder requires the full set, so append the leftovers.
+        List<Grid.Column<Row>> ordered = new ArrayList<>();
+        for (UserNewsService.ColumnState cs : prefs) {
+            Grid.Column<Row> c = headlines.getColumnByKey(cs.key());
+            if (c != null && !ordered.contains(c)) ordered.add(c);
+        }
+        for (Grid.Column<Row> c : headlines.getColumns()) {
+            if (!ordered.contains(c)) ordered.add(c);
+        }
+        headlines.setColumnOrder(ordered);
+        columnOrder = ordered;
     }
 
     private void applyGrouping(GroupBy by) {

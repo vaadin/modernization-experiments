@@ -47,20 +47,27 @@ public class UserNewsService {
     public record FeedRef(long subscriptionId, String title, String folder, int position,
             String url, String authUsername) {}
 
+    /** One headlines-grid column's saved layout, detached from JPA. {@code width} is null when the
+     *  column is left to flex/auto-size. */
+    public record ColumnState(String key, int position, String width, boolean visible) {}
+
     private final FeedRepository feeds;
     private final ArticleRepository articles;
     private final SubscriptionRepository subscriptions;
     private final ArticleStateRepository states;
     private final com.example.headlines.data.FolderPrefRepository folderPrefs;
+    private final com.example.headlines.data.ColumnPrefRepository columnPrefs;
 
     public UserNewsService(FeedRepository feeds, ArticleRepository articles,
             SubscriptionRepository subscriptions, ArticleStateRepository states,
-            com.example.headlines.data.FolderPrefRepository folderPrefs) {
+            com.example.headlines.data.FolderPrefRepository folderPrefs,
+            com.example.headlines.data.ColumnPrefRepository columnPrefs) {
         this.feeds = feeds;
         this.articles = articles;
         this.subscriptions = subscriptions;
         this.states = states;
         this.folderPrefs = folderPrefs;
+        this.columnPrefs = columnPrefs;
     }
 
     /** First-login bootstrap: give a brand-new user the default subscription set (from feeds.opml). */
@@ -218,5 +225,39 @@ public class UserNewsService {
         subscriptions.findById(subscriptionId)
                 .filter(s -> s.getOwner().equals(subject))
                 .ifPresent(subscriptions::delete);
+    }
+
+    // --- headlines-grid column layout (order / width / visibility), per user ---
+
+    /** The user's saved column layout in left-to-right order; empty if they never customised it. */
+    @Transactional(readOnly = true)
+    public List<ColumnState> columnPrefs(String subject) {
+        return columnPrefs.findByOwnerOrderByPositionAsc(subject).stream()
+                .map(c -> new ColumnState(c.getColKey(), c.getPosition(), c.getWidth(), c.isVisible()))
+                .toList();
+    }
+
+    /** Persist the full column layout snapshot (order, width, visibility) for this user. The given
+     *  list is the current left-to-right column order; each entry's {@code position} is reassigned
+     *  from its index so the stored order matches exactly. */
+    @Transactional
+    public void saveColumnLayout(String subject, List<ColumnState> columns) {
+        Map<String, com.example.headlines.data.ColumnPref> mine =
+                columnPrefs.findByOwnerOrderByPositionAsc(subject).stream()
+                        .collect(Collectors.toMap(com.example.headlines.data.ColumnPref::getColKey,
+                                Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        int pos = 0;
+        for (ColumnState cs : columns) {
+            com.example.headlines.data.ColumnPref pref = mine.get(cs.key());
+            if (pref == null) {
+                columnPrefs.save(new com.example.headlines.data.ColumnPref(
+                        subject, cs.key(), pos++, cs.width(), cs.visible()));
+            } else {
+                pref.setPosition(pos++);
+                pref.setWidth(cs.width());
+                pref.setVisible(cs.visible());
+                columnPrefs.save(pref);
+            }
+        }
     }
 }

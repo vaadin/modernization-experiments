@@ -53,12 +53,13 @@ class UserNewsServiceTest {
     @Autowired SubscriptionRepository subscriptions;
     @Autowired ArticleStateRepository states;
     @Autowired com.example.headlines.data.FolderPrefRepository folderPrefs;
+    @Autowired com.example.headlines.data.ColumnPrefRepository columnPrefs;
 
     private UserNewsService svc;
 
     @BeforeEach
     void setUp() {
-        svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs);
+        svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs, columnPrefs);
     }
 
     @Test
@@ -170,5 +171,43 @@ class UserNewsServiceTest {
         List<UserNewsService.FeedRef> refs = svc.feedRefs(ALICE);
         assertEquals(List.of("B", "A"), refs.stream().map(UserNewsService.FeedRef::title).toList());
         assertTrue(refs.stream().allMatch(r -> "News".equals(r.folder())));
+    }
+
+    @Test
+    void columnLayoutPersistsOrderWidthAndVisibility() {
+        svc.saveColumnLayout(ALICE, List.of(
+                new UserNewsService.ColumnState("title", 0, null, true),
+                new UserNewsService.ColumnState("date", 1, "200px", true),
+                new UserNewsService.ColumnState("author", 2, null, false))); // hidden
+
+        List<UserNewsService.ColumnState> saved = svc.columnPrefs(ALICE);
+        assertEquals(List.of("title", "date", "author"),
+                saved.stream().map(UserNewsService.ColumnState::key).toList(), "stored in order");
+        assertEquals("200px", saved.get(1).width(), "date keeps its resized width");
+        assertFalse(saved.get(2).visible(), "author stays hidden");
+    }
+
+    @Test
+    void savingColumnLayoutAgainUpsertsWithoutDuplicates() {
+        svc.saveColumnLayout(ALICE, List.of(
+                new UserNewsService.ColumnState("author", 0, null, true),
+                new UserNewsService.ColumnState("title", 1, null, true)));
+        // Reorder + hide title on a second save.
+        svc.saveColumnLayout(ALICE, List.of(
+                new UserNewsService.ColumnState("title", 0, null, false),
+                new UserNewsService.ColumnState("author", 1, null, true)));
+
+        List<UserNewsService.ColumnState> saved = svc.columnPrefs(ALICE);
+        assertEquals(2, saved.size(), "upsert, not insert — no duplicate rows per column");
+        assertEquals(List.of("title", "author"),
+                saved.stream().map(UserNewsService.ColumnState::key).toList());
+        assertFalse(saved.get(0).visible(), "title now hidden");
+    }
+
+    @Test
+    void columnLayoutIsPerUser() {
+        svc.saveColumnLayout(ALICE, List.of(new UserNewsService.ColumnState("author", 0, null, false)));
+        assertFalse(svc.columnPrefs(ALICE).get(0).visible(), "alice hid author");
+        assertTrue(svc.columnPrefs(BOB).isEmpty(), "bob keeps the default layout (isolated)");
     }
 }

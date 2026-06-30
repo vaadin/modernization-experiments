@@ -698,10 +698,9 @@ per-feed auth) and we added what the desktop app lacks (multi-user, Keycloak SSO
 zero-install web). But RSSOwl the *application* still has whole subsystems we deliberately didn't
 build: **full-text (Lucene) search** with saved-search criteria (ours is a live substring filter over
 the loaded headlines, not an index), embedded-browser article rendering, news filters/actions,
-notifications, OPML import/export UI, scheduled per-feed refresh, column persistence, keyboard
-navigation, news bins, and sync. Labels are a basic single-colour-per-item subset (no label CRUD /
-multi-label). Faithful on the slice; a fraction of the whole app — exactly the honest scope this
-experiment set out to measure.
+notifications, OPML import/export UI, scheduled per-feed refresh, keyboard navigation, news bins, and
+sync. Labels are a basic single-colour-per-item subset (no label CRUD / multi-label). Faithful on the
+slice; a fraction of the whole app — exactly the honest scope this experiment set out to measure.
 
 **A clarification worth recording (it was nearly mis-stated as a finding).** RSSOwl is *not* "mostly
 SWT scaffolding" — SWT isn't even in its 121k lines (it's an external Eclipse dependency); its own
@@ -711,6 +710,40 @@ collapses sharply in Vaadin**: the ~500-line `NewsComparator` became a handful o
 one-liners, owner-draw rendering became a little CSS, and JFace content/label-provider ceremony
 disappears into `Grid` renderers. That compression is real and quotable — but it's about the JFace
 boilerplate shrinking, not the application being "mostly scaffolding."
+
+### Day 4 — column persistence (order / width / visibility)
+
+Closed one of the open stretch items: the headlines grid now remembers each user's **column order,
+widths, and which columns are shown** across logout/restart — exactly what RSSOwl persists on its
+`NewsColumn` model. The Vaadin side is small and declarative: `grid.setColumnReorderingAllowed(true)`
+plus `column.setResizable(true)`, two listeners (`addColumnReorderListener`, `addColumnResizeListener`),
+and a "Columns" menu of checkable items for visibility. A new per-user `ColumnPref` entity
+(`owner, colKey, position, width, visible`, mirroring the existing `FolderPref`) stores the layout;
+any of the three gestures snapshots the full column state and upserts it, and the saved layout is
+re-applied on view load via `grid.setColumnOrder(...)` + `setWidth`/`setVisible`. Total new code is
+about one entity, one repository, two short service methods, and ~40 lines of view wiring — the
+persistence model is the same owner-keyed pattern already proven for subscriptions and folders.
+
+Honest findings from this slice:
+- **The reorder/resize APIs are exactly where you'd expect, and current.** The MCP docs (Vaadin 25.1)
+  confirmed `setColumnReorderingAllowed` / `setResizable` and the resize-event flow; no stale-API
+  surprises this time. The one design choice worth noting: a *resized* column becomes fixed-width
+  (`setFlexGrow(0)`), matching RSSOwl, so a restored width sticks instead of being overridden by flex.
+- **Playwright still can't drive Vaadin's header drag — and now neither its overlay menu via click.**
+  A synthetic header-to-header `dragTo` did **not** trigger Vaadin's column reorder (same family as the
+  documented `GridContextMenu` gotcha), and clicking the "Columns" menu-bar item opened an overlay that
+  closed before it could be asserted. **Keyboard navigation was the reliable path**: focus the menu
+  button, `Enter` to open, `ArrowDown` + `Enter` to toggle an item. That drove the real server round-trip.
+- **Verified end-to-end the way that *does* work.** Hiding the **Feed** column via the keyboard-driven
+  menu removed it from the grid; after a **full page reload** (Keycloak re-auth included) the column
+  stayed hidden — proving the `column_pref` save and the on-load restore. Toggling it back produced a
+  clean default again. Per-user isolation is covered by a service test (alice's hidden column does not
+  affect bob), alongside order/width round-trip and idempotent-upsert tests — **34 tests green** (was 31).
+- **The honest limit:** column *reorder* and *resize* persistence share the identical save/restore path
+  as visibility (same listener → `saveColumnLayout` → `applyColumnPrefs`) and are unit-tested, but the
+  drag *gestures themselves* were confirmed by code + tests rather than by browser automation, because
+  the harness can't synthesise them. A human dragging a header sees it persist; Playwright can't perform
+  that drag.
 
 ## Honest findings so far
 
@@ -794,5 +827,7 @@ _(This section is the point of the experiment and grows as we go.)_
 - [x] Fill in the honest-findings section with specifics and an effort estimate.
 - [x] Deepen: **real RSS feeds** (RSSOwl's defaults via `FeedService`/Rome) + **grouping** via
       `TreeGrid` (None/Date/Status/Author/Category/Feed/Sticky) — done; see "Deepening" above.
-- [ ] Stretch (still beyond the timebox): multi-select, auto-mark-read timer, column persistence,
-      direction-aware null sorting; then re-measure effort.
+- [x] **Column persistence** (per-user order / width / visibility, restored on load) — done; see
+      "Day 4" above. `ColumnPref` entity + reorder/resize/visibility wiring; 34 tests green.
+- [ ] Stretch (still beyond the timebox): multi-select, auto-mark-read timer, direction-aware null
+      sorting; then re-measure effort.

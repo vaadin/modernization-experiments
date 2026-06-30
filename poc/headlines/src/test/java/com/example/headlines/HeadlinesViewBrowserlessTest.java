@@ -56,6 +56,7 @@ class HeadlinesViewBrowserlessTest extends BrowserlessTest {
         when(news.newsItems("alice-subject")).thenReturn(List.of(
                 new NewsItem(1, "Headline one", "Reporter", "Uncategorized", "BBC News",
                         LocalDateTime.of(2026, 1, 1, 0, 0), State.UNREAD, false, null, "https://x/1", false)));
+        when(news.columnPrefs("alice-subject")).thenReturn(List.of()); // default layout, no saved prefs
 
         var fetch = mock(FeedFetchService.class);
         return new HeadlinesView(news, fetch, auth);
