@@ -787,6 +787,8 @@ top-level folders, 16 sub-folders, and 292 feeds**. Verified in the browser: Ali
 same 15 folders + 12 loose top-level channels + the 5 smart folders, and expanding *Computers* reveals
 *Windows / Linux / Mac / PDA* (then its direct feeds) — the original nesting and OPML order, 1:1.
 
+![Alice's feeds tree, seeded 1:1 from RSSOwl's default OPML — nested folders (Computers › Windows/Linux/Mac/PDA)](after/vaadin-tree-mirror.png)
+
 What this took, and the honest caveats:
 - **The folder model had to grow from flat to nested.** Subscriptions store a folder *path*
   (`"Computers/Windows"`); the OPML parser walks ancestor `<outline>`s to build it; the tree renderer
