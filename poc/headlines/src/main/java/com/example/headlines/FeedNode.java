@@ -16,7 +16,7 @@ package com.example.headlines;
  * RSSOwl ("Business (151)").
  */
 public sealed interface FeedNode
-        permits FeedNode.Category, FeedNode.Feed, FeedNode.Saved, FeedNode.SavedSearch {
+        permits FeedNode.Category, FeedNode.Feed, FeedNode.Saved, FeedNode.SavedSearch, FeedNode.Bin {
 
     String label();
 
@@ -47,5 +47,11 @@ public sealed interface FeedNode
      *  is the Lucene query run when selected; {@code id} ties it to the persisted row for deletion. */
     record SavedSearch(long id, String name, String query, int count) implements FeedNode {
         @Override public String label() { return "🔎 " + name + (count > 0 ? "  (" + count + ")" : ""); }
+    }
+
+    /** A news bin (RSSOwl: a container of explicitly-added news). {@code id} ties it to the persisted
+     *  row; selecting it shows its articles. */
+    record Bin(long id, String name, int count) implements FeedNode {
+        @Override public String label() { return "🗄 " + name + "  (" + count + ")"; }
     }
 }

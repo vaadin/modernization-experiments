@@ -99,6 +99,8 @@ public class HeadlinesView extends Div {
 
     private final List<NewsItem.LabelRef> userLabels = new ArrayList<>(); // this user's managed labels
     private GridMenuItem<Row> labelRoot; // the context-menu "Label" submenu, repopulated on label CRUD
+    private GridMenuItem<Row> binRoot;   // the context-menu "Add to bin" submenu, repopulated on bin CRUD
+    private Long currentBinId;           // non-null when a news bin is the current tree selection
 
     private List<NewsItem> allItems; // reloaded after add/unsubscribe
     private List<NewsItem> currentItems; // the feed/folder/smart-folder selection
@@ -265,11 +267,13 @@ public class HeadlinesView extends Div {
         feedTree.addHierarchyColumn(FeedNode::label).setHeader("Feeds");
         feedTree.setDataProvider(feedDataProvider);
         feedTree.setPartNameGenerator(n -> n instanceof FeedNode.Category ? "feed-category"
-                : (n instanceof FeedNode.Saved || n instanceof FeedNode.SavedSearch) ? "feed-saved" : null);
+                : (n instanceof FeedNode.Saved || n instanceof FeedNode.SavedSearch || n instanceof FeedNode.Bin)
+                ? "feed-saved" : null);
         enableFeedDragAndDrop();
 
         feedTree.addSelectionListener(e -> {
             FeedNode sel = e.getFirstSelectedItem().orElse(null);
+            currentBinId = (sel instanceof FeedNode.Bin b) ? b.id() : null; // track for "remove from bin"
             if (sel instanceof FeedNode.Category c) {
                 // A folder shows its own feeds plus everything in its sub-folders (path prefix match).
                 String p = c.path();
@@ -282,6 +286,8 @@ public class HeadlinesView extends Div {
             } else if (sel instanceof FeedNode.SavedSearch ss) {
                 // A saved search re-runs its Lucene query over the whole archive (results, not a filter).
                 currentItems = news.search(subject, ss.query());
+            } else if (sel instanceof FeedNode.Bin b) {
+                currentItems = news.binItems(subject, b.id());
             } else {
                 currentItems = allItems;
             }
@@ -301,13 +307,21 @@ public class HeadlinesView extends Div {
                     reloadUserData();
                     Notification.show("Saved search deleted");
                 }));
+        GridMenuItem<FeedNode> delBinItem = feedMenu.addItem("Delete bin", e -> e.getItem()
+                .filter(n -> n instanceof FeedNode.Bin).ifPresent(n -> {
+                    news.deleteBin(subject, ((FeedNode.Bin) n).id());
+                    reloadUserData();
+                    Notification.show("Bin deleted");
+                }));
         feedMenu.setDynamicContentHandler(node -> {
             boolean feed = node instanceof FeedNode.Feed;
             boolean savedSearch = node instanceof FeedNode.SavedSearch;
+            boolean bin = node instanceof FeedNode.Bin;
             credItem.setVisible(feed);
             unsubItem.setVisible(feed);
             delSearchItem.setVisible(savedSearch);
-            return feed || savedSearch; // no menu on folders / fixed smart folders
+            delBinItem.setVisible(bin);
+            return feed || savedSearch || bin; // no menu on folders / fixed smart folders
         });
     }
 
@@ -542,6 +556,10 @@ public class HeadlinesView extends Div {
         for (UserNewsService.SavedSearchRef ss : news.savedSearches(subject)) {
             int c = ss.query().isBlank() ? 0 : news.search(subject, ss.query()).size();
             feedData.addItem(null, new FeedNode.SavedSearch(ss.id(), ss.name(), ss.query(), c));
+        }
+        // The user's news bins (containers of explicitly-added articles), at the bottom.
+        for (UserNewsService.BinRef b : news.bins(subject)) {
+            feedData.addItem(null, new FeedNode.Bin(b.id(), b.name(), b.count()));
         }
     }
 
@@ -1002,6 +1020,12 @@ public class HeadlinesView extends Div {
         labelRoot = menu.addItem("Label");
         populateLabelSubmenu();
 
+        // Add-to-bin submenu (RSSOwl: copy news into a bin) + remove-from-bin when a bin is open.
+        binRoot = menu.addItem("Add to bin");
+        populateBinSubmenu();
+        GridMenuItem<Row> removeFromBin = menu.addItem("Remove from this bin", e -> e.getItem()
+                .ifPresent(r -> removeFromBinBulk(actionTargets(r))));
+
         menu.setDynamicContentHandler(row -> {
             if (!(row instanceof Row.ItemRow ir)) return false; // no menu on group rows
             int n = actionTargets(row).size();
@@ -1009,8 +1033,58 @@ public class HeadlinesView extends Div {
             read.setText((ir.news().unread() ? "Mark read" : "Mark unread") + suffix);
             sticky.setText((ir.news().sticky() ? "Remove sticky" : "Make sticky") + suffix);
             labelRoot.setText("Label" + suffix);
+            binRoot.setText("Add to bin" + suffix);
+            removeFromBin.setVisible(currentBinId != null); // only meaningful while viewing a bin
             return true;
         });
+    }
+
+    /** (Re)build the "Add to bin" submenu from the user's bins; each adds the target rows to that bin.
+     *  Plus "New bin…" which creates a bin and drops the targets in. */
+    private void populateBinSubmenu() {
+        binRoot.getSubMenu().removeAll();
+        for (UserNewsService.BinRef b : news.bins(subject)) {
+            binRoot.getSubMenu().addItem(b.name(),
+                    e -> e.getItem().ifPresent(r -> addToBinBulk(actionTargets(r), b.id())));
+        }
+        binRoot.getSubMenu().addItem("New bin…", e -> e.getItem().ifPresent(r -> openNewBinDialog(actionTargets(r))));
+    }
+
+    private void addToBinBulk(List<Row.ItemRow> rows, long binId) {
+        if (rows.isEmpty()) return;
+        news.addToBin(subject, binId, rows.stream().map(ir -> ir.news().id()).toList());
+        reloadUserData(); // refresh bin counts (and the bin view if it's open)
+        Notification.show("Added " + rows.size() + " to bin");
+    }
+
+    private void removeFromBinBulk(List<Row.ItemRow> rows) {
+        if (currentBinId == null || rows.isEmpty()) return;
+        news.removeFromBin(subject, currentBinId, rows.stream().map(ir -> ir.news().id()).toList());
+        reloadUserData();
+        Notification.show("Removed " + rows.size() + " from bin");
+    }
+
+    /** Prompt for a bin name, create it, and drop the given rows in. */
+    private void openNewBinDialog(List<Row.ItemRow> rows) {
+        Dialog dialog = new Dialog();
+        dialog.setHeaderTitle("New bin");
+        TextField name = new TextField("Name");
+        name.setWidthFull();
+        dialog.add(name);
+        Button create = new Button("Create", e -> {
+            if (name.getValue() == null || name.getValue().isBlank()) {
+                name.setInvalid(true); name.setErrorMessage("A name is required"); return;
+            }
+            long binId = news.createBin(subject, name.getValue().trim());
+            if (!rows.isEmpty()) news.addToBin(subject, binId, rows.stream().map(ir -> ir.news().id()).toList());
+            reloadUserData();
+            populateBinSubmenu();
+            dialog.close();
+            Notification.show("Bin created");
+        });
+        create.addThemeVariants(ButtonVariant.LUMO_PRIMARY);
+        dialog.getFooter().add(new Button("Cancel", e -> dialog.close()), create);
+        dialog.open();
     }
 
     /** (Re)build the Label submenu from the user's managed labels: one toggle per label, plus clear +

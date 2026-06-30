@@ -699,11 +699,12 @@ per-feed auth) and we added what the desktop app lacks (multi-user, Keycloak SSO
 zero-install web). But RSSOwl the *application* still has whole subsystems we deliberately didn't
 build: news filters/actions, notifications, OPML import/export UI, scheduled per-feed refresh, keyboard
 navigation, news bins, and sync. Labels are a basic single-colour-per-item subset. Faithful on the slice; a fraction of the
-whole app — exactly the honest scope this experiment set out to measure. _(Update, Days 7–14: much of
-this list was subsequently built — inline article rendering (Day 7), Lucene full-text search (Day 9),
-OPML import/export UI (Day 10), notifications (Days 11/13), scheduled refresh (Day 12), and the news
-filters/actions rules engine (Day 14). Still genuinely absent: news bins, label CRUD/multi-label, and
-sync (a dead API). See the per-day sections below.)_
+whole app — exactly the honest scope this experiment set out to measure. _(Update, Days 7–17: nearly all
+of this list was subsequently built — inline article rendering (Day 7), Lucene full-text search (Day 9),
+OPML import/export UI (Day 10), notifications (Days 11/13), scheduled refresh (Day 12), the news
+filters/actions rules engine (Day 14), label management — custom + multi-label (Day 15), saved searches
+(Day 16), and news bins (Day 17). What's left is genuinely out of scope or impossible on the web:
+keyboard navigation (polish) and sync (a dead API). See the per-day sections below.)_
 
 **A clarification worth recording (it was nearly mis-stated as a finding).** RSSOwl is *not* "mostly
 SWT scaffolding" — SWT isn't even in its 121k lines (it's an external Eclipse dependency); its own
@@ -1032,6 +1033,27 @@ typed a query — saves it; the saved search appears in the feeds tree under the
 
 This was the last small gap worth closing. What remains is genuinely out of scope or impossible on the
 web (see below).
+
+### Day 17 — news bins (the last subsystem)
+
+The final out-of-slice subsystem: RSSOwl's **news bins** — containers you explicitly drop news into (a
+bin never fetches). A per-user `NewsBin` holds a set of article ids; bins appear in the feeds tree
+(`🗄 name (count)`) below the saved searches, and selecting one shows its articles. The headlines context
+menu gains an **"Add to bin"** submenu (the user's bins + "New bin…", operating on the multi-selection)
+and a **"Remove from this bin"** action shown only while a bin is open; right-click a bin → "Delete bin".
+
+- **Owner-scoped, like everything else:** `binItems` resolves the stored ids to `NewsItem`s merged with
+  the user's read/sticky/labels, and returns only public or the user's own private articles — a stray id
+  can't expose another user's content. Unit-tested alongside add/remove/delete and per-user isolation.
+- **Verified end-to-end in the browser:** a bin "Read later" with two articles shows as **🗄 Read later
+  (2)** in the tree, and selecting it loads exactly those two items (label chips and all). **55 tests
+  green.** The add/remove actions live in the `GridContextMenu` (not openable via synthetic Playwright
+  events), so those are covered by unit tests + the verified bin-view render path.
+
+![A news bin "Read later" in the tree showing its two binned articles](after/news-bin.png)
+
+With news bins, **every RSSOwl subsystem that makes sense on the web is now built.** What remains —
+keyboard navigation and Google-Reader sync — is polish or impossible (see the findings below).
 
 ## Honest findings so far
 

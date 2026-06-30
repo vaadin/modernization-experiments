@@ -59,6 +59,7 @@ class UserNewsServiceTest {
     @Autowired com.example.headlines.data.NewsFilterRepository newsFilters;
     @Autowired com.example.headlines.data.LabelRepository labelRepo;
     @Autowired com.example.headlines.data.SavedSearchRepository savedSearches;
+    @Autowired com.example.headlines.data.NewsBinRepository newsBins;
 
     private UserNewsService svc;
     // Stub full-text search: returns a fixed set of article IDs, so search() scoping is testable
@@ -69,7 +70,7 @@ class UserNewsServiceTest {
     void setUp() {
         ArticleSearch fakeSearch = (q, limit) -> List.copyOf(searchHits);
         svc = new UserNewsService(feeds, articles, subscriptions, states, folderPrefs, columnPrefs,
-                userStates, newsFilters, labelRepo, savedSearches, fakeSearch);
+                userStates, newsFilters, labelRepo, savedSearches, newsBins, fakeSearch);
     }
 
     @Test
@@ -134,6 +135,33 @@ class UserNewsServiceTest {
         var remaining = svc.newsItems(ALICE).get(0).labels();
         assertEquals(1, remaining.size(), "deleting a label removes it from the item");
         assertEquals("To Do", remaining.get(0).name());
+    }
+
+    @Test
+    void newsBinHoldsItemsIsOwnerScopedAndRemovable() {
+        Feed f = feeds.save(new Feed("https://feed", "F", null));
+        Article a1 = articles.save(new Article(f, null, "https://x/1", "Public one", "a", LocalDateTime.now(), false));
+        Article a2 = articles.save(new Article(f, null, "https://x/2", "Public two", "a", LocalDateTime.now(), false));
+        Article bobPriv = articles.save(new Article(f, BOB, "https://x/bp", "Bob private", "a", LocalDateTime.now(), false));
+
+        long bin = svc.createBin(ALICE, "Keep");
+        svc.addToBin(ALICE, bin, List.of(a1.getId(), a2.getId(), bobPriv.getId()));
+
+        var titles = svc.binItems(ALICE, bin).stream().map(NewsItem::title).toList();
+        assertEquals(2, titles.size(), "only the 2 visible (public) articles surface");
+        assertTrue(titles.contains("Public one") && titles.contains("Public two"));
+        assertFalse(titles.contains("Bob private"), "bin never exposes another user's private article");
+        assertEquals(3, svc.bins(ALICE).get(0).count(), "count is stored ids (incl. the non-visible one)");
+
+        svc.removeFromBin(ALICE, bin, List.of(a1.getId()));
+        assertFalse(svc.binItems(ALICE, bin).stream().anyMatch(n -> n.title().equals("Public one")), "removed");
+
+        // bob can't see or delete alice's bin
+        assertTrue(svc.bins(BOB).isEmpty());
+        svc.deleteBin(BOB, bin);
+        assertEquals(1, svc.bins(ALICE).size(), "another user can't delete it");
+        svc.deleteBin(ALICE, bin);
+        assertTrue(svc.bins(ALICE).isEmpty());
     }
 
     @Test

@@ -67,10 +67,14 @@ public class UserNewsService {
     private final com.example.headlines.data.NewsFilterRepository newsFilters;
     private final com.example.headlines.data.LabelRepository labelRepo;
     private final com.example.headlines.data.SavedSearchRepository savedSearches;
+    private final com.example.headlines.data.NewsBinRepository newsBins;
     private final ArticleSearch articleSearch;
 
     /** A user's saved search, detached for the view. */
     public record SavedSearchRef(long id, String name, String query) {}
+
+    /** A user's news bin, detached for the view (with its item count). */
+    public record BinRef(long id, String name, int count) {}
 
     /** RSSOwl's default labels (name, colour), seeded per user on first use. */
     private static final String[][] DEFAULT_LABELS = {
@@ -85,6 +89,7 @@ public class UserNewsService {
             com.example.headlines.data.NewsFilterRepository newsFilters,
             com.example.headlines.data.LabelRepository labelRepo,
             com.example.headlines.data.SavedSearchRepository savedSearches,
+            com.example.headlines.data.NewsBinRepository newsBins,
             ArticleSearch articleSearch) {
         this.feeds = feeds;
         this.articles = articles;
@@ -96,7 +101,79 @@ public class UserNewsService {
         this.newsFilters = newsFilters;
         this.labelRepo = labelRepo;
         this.savedSearches = savedSearches;
+        this.newsBins = newsBins;
         this.articleSearch = articleSearch;
+    }
+
+    // --- news bins (RSSOwl: a container the user drops news into; never fetches) ---
+
+    /** The user's bins (with item counts), in order. */
+    @Transactional(readOnly = true)
+    public List<BinRef> bins(String subject) {
+        return newsBins.findByOwnerOrderByPositionAsc(subject).stream()
+                .map(b -> new BinRef(b.getId(), b.getName(), b.getArticleIds().size())).toList();
+    }
+
+    @Transactional
+    public long createBin(String subject, String name) {
+        int pos = newsBins.findByOwnerOrderByPositionAsc(subject).size();
+        return newsBins.save(new com.example.headlines.data.NewsBin(subject, name, pos)).getId();
+    }
+
+    @Transactional
+    public void deleteBin(String subject, long binId) {
+        newsBins.findById(binId).filter(b -> b.getOwner().equals(subject)).ifPresent(newsBins::delete);
+    }
+
+    /** Add articles to a bin (owner-checked). Idempotent — already-present ids are ignored. */
+    @Transactional
+    public void addToBin(String subject, long binId, java.util.Collection<Long> articleIds) {
+        newsBins.findById(binId).filter(b -> b.getOwner().equals(subject)).ifPresent(b -> {
+            b.getArticleIds().addAll(articleIds);
+            newsBins.save(b);
+        });
+    }
+
+    @Transactional
+    public void removeFromBin(String subject, long binId, java.util.Collection<Long> articleIds) {
+        newsBins.findById(binId).filter(b -> b.getOwner().equals(subject)).ifPresent(b -> {
+            b.getArticleIds().removeAll(articleIds);
+            newsBins.save(b);
+        });
+    }
+
+    /**
+     * The articles in a bin, as {@link NewsItem}s merged with this user's state + labels. <b>Security:</b>
+     * only public articles or the user's own private ones are returned, so a bin can't expose another
+     * user's private content even if an id leaked in.
+     */
+    @Transactional(readOnly = true)
+    public List<NewsItem> binItems(String subject, long binId) {
+        com.example.headlines.data.NewsBin bin = newsBins.findById(binId)
+                .filter(b -> b.getOwner().equals(subject)).orElse(null);
+        if (bin == null || bin.getArticleIds().isEmpty()) return List.of();
+
+        Map<Long, ArticleState> stateByArticle = states.findByOwner(subject).stream()
+                .collect(Collectors.toMap(st -> st.getArticle().getId(), Function.identity(), (a, b) -> a));
+        List<com.example.headlines.data.Label> userLabels = labelRepo.findByOwnerOrderByPositionAsc(subject);
+
+        List<NewsItem> out = new ArrayList<>();
+        for (Article a : articles.findAllById(bin.getArticleIds())) {
+            String owner = a.getOwner();
+            if (owner != null && !owner.equals(subject)) continue; // never another user's private article
+            ArticleState st = stateByArticle.get(a.getId());
+            boolean read = st != null && st.isRead();
+            boolean sticky = st != null && st.isSticky();
+            String cat = a.getFeed().getDefaultCategory();
+            NewsItem item = new NewsItem(a.getId(), a.getTitle(), a.getAuthor(),
+                    (cat == null || cat.isBlank()) ? "Uncategorized" : cat, a.getFeed().getTitle(),
+                    a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, null,
+                    a.getLink(), a.isAttachments());
+            item.setContent(a.getContent());
+            item.setLabels(resolveLabels(st, userLabels));
+            out.add(item);
+        }
+        return out;
     }
 
     // --- saved searches (RSSOwl: a persisted search shown as a smart folder) ---
