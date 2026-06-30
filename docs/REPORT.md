@@ -921,6 +921,24 @@ user's `lastSeen` timestamp; on load we count the user's articles published sinc
   separate gap), so there's nothing new to announce while the page stays open. The "since last visit"
   count is the meaningful, faithful slice of the feature our architecture supports today.
 
+### Day 12 — periodic background refresh
+
+RSSOwl auto-reloads feeds on a timer; now so does the PoC. A Spring `@Scheduled` task
+(`feeds.refresh-interval-ms`, default 15 min, first run one interval after startup) runs the same shared
+anonymous refresh used at boot. An `AtomicBoolean` guard means a slow run is skipped rather than stacking
+up, and because the refresh inserts `Article`s, the H2 full-text trigger keeps the **Lucene index current**
+automatically and the new items feed the next "since last visit" count.
+
+- **Verified at runtime** (interval overridden to 45 s via `FEEDS_REFRESH_INTERVAL_MS`): the log shows the
+  startup refresh on the `initial-refresh` thread (72 new), then the periodic run firing one interval later
+  on the `scheduling-1` thread (*"Periodic feed refresh starting…"*) and completing with **7 new articles**
+  picked up with no user action. Like the other timer/push features, this is verified by running it and
+  reading the logs, not a unit test (a test would only exercise Spring's scheduler).
+- **Honest scope:** this keeps the *server-side* content fresh on a timer. It does **not** yet push those
+  new items into an already-open page mid-session (no live toast / auto-inserting row) — that needs
+  broadcasting to attached UIs, which we haven't wired. So "notifications" remain between-visit; periodic
+  refresh just means there's genuinely new content to find on the next visit or feed reload.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_

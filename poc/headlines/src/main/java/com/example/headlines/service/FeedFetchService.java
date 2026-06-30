@@ -67,6 +67,9 @@ public class FeedFetchService {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
+    // Guards the shared full refresh so the periodic timer never overlaps the startup fetch (or itself).
+    private final java.util.concurrent.atomic.AtomicBoolean refreshing = new java.util.concurrent.atomic.AtomicBoolean();
+
     public FeedFetchService(FeedRepository feeds, ArticleRepository articles, ArticleSearchService search) {
         this.feeds = feeds;
         this.articles = articles;
@@ -101,11 +104,37 @@ public class FeedFetchService {
     }
 
     /**
+     * Periodic background refresh — RSSOwl auto-refreshes feeds on a timer (its "Reload" interval).
+     * Runs every {@code feeds.refresh-interval-ms} (default 15 min), the first run one interval after
+     * startup (the {@code @PostConstruct} fetch already covers boot). The {@link #refreshing} guard means
+     * a slow run is simply skipped rather than stacking up.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(
+            fixedDelayString = "${feeds.refresh-interval-ms:900000}",
+            initialDelayString = "${feeds.refresh-interval-ms:900000}")
+    void scheduledRefresh() {
+        log.info("Periodic feed refresh starting…");
+        refreshAll();
+    }
+
+    /**
      * Shared refresh: fetch every feed <b>anonymously</b> (never with any user's stored credentials)
      * and store the articles as public (owner = null). Auth-gated feeds simply 401 here and are
      * skipped — their content is fetched per-user instead (see {@link #refreshForUser}).
      */
     public void refreshAll() {
+        if (!refreshing.compareAndSet(false, true)) {
+            log.info("Feed refresh already in progress — skipping this run.");
+            return;
+        }
+        try {
+            doRefreshAll();
+        } finally {
+            refreshing.set(false);
+        }
+    }
+
+    private void doRefreshAll() {
         List<Feed> all = feeds.findAll();
         if (all.isEmpty()) return;
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(all.size(), 24));

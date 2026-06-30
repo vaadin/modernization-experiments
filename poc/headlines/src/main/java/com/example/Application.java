@@ -19,6 +19,7 @@ import com.vaadin.flow.component.page.AppShellConfigurator;
 import com.vaadin.flow.component.page.Push;
 
 @SpringBootApplication
+@org.springframework.scheduling.annotation.EnableScheduling // periodic background feed refresh
 @StyleSheet(Aura.STYLESHEET)
 @StyleSheet("styles.css") // Your custom styles
 @Push
