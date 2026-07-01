@@ -277,8 +277,14 @@ public class HeadlinesView extends Div {
         // Build the tree from the user's persisted subscriptions (folder + drag order).
         buildFeedTreeData();
 
-        // FLATTENED keeps scroll/expansion stable across refreshAll() after a drag (see Vaadin docs).
-        feedDataProvider = new TreeDataProvider<>(feedData, HierarchyFormat.FLATTENED);
+        // FLATTENED keeps scroll/expansion stable across refreshAll(). Crucially, identify nodes by a
+        // STABLE key (path / id) rather than the record's value-equality: a record carries its unread
+        // count, so without this a changing count makes a folder "a different item" and the TreeGrid
+        // silently drops its expansion — the folder collapses on every read. Stable ids let refreshAll()
+        // update counts in place while keeping folders open and the selection intact.
+        feedDataProvider = new TreeDataProvider<FeedNode>(feedData, HierarchyFormat.FLATTENED) {
+            @Override public Object getId(FeedNode item) { return nodeId(item); }
+        };
         feedTree.addHierarchyColumn(FeedNode::label).setHeader("Feeds");
         feedTree.setDataProvider(feedDataProvider);
         // Bold feeds/folders with unread, normal (greyed) when all read — RSSOwl-style. Smart folders,
@@ -562,9 +568,8 @@ public class HeadlinesView extends Div {
     /** Re-query the current user's data and rebuild the tree + grid (after add/unsubscribe). */
     private void reloadUserData() {
         this.allItems = news.newsItems(subject);
-        buildFeedTreeData();
-        feedDataProvider = new TreeDataProvider<>(feedData, HierarchyFormat.FLATTENED);
-        feedTree.setDataProvider(feedDataProvider);
+        buildFeedTreeData();           // clears+repopulates the SAME feedData (keeps provider + expansion)
+        feedDataProvider.refreshAll();
         this.currentItems = allItems;
         applyGrouping(currentGroupBy);
     }
@@ -572,9 +577,24 @@ public class HeadlinesView extends Div {
     /** Rebuild only the feeds-tree counts/bolding from the in-memory items (no DB reload, keeps the
      *  current selection/grid). Called after read/sticky/label changes so unread counts stay live. */
     private void refreshTreeCounts() {
-        buildFeedTreeData(); // reads the (already-updated) allItems; recomputes unread counts
-        feedDataProvider = new TreeDataProvider<>(feedData, HierarchyFormat.FLATTENED);
-        feedTree.setDataProvider(feedDataProvider);
+        buildFeedTreeData();           // clears+repopulates the SAME feedData with new unread counts
+        feedDataProvider.refreshAll(); // re-render in place: stable ids keep folders expanded + selection
+    }
+
+    /**
+     * A node's STABLE identity for the tree data provider — independent of the unread {@code count}
+     * carried in the record (which changes on every read). Without this the {@link TreeGrid} treats a
+     * recounted folder as a brand-new item and drops its expansion, collapsing the tree. See the
+     * provider setup in the constructor.
+     */
+    private static Object nodeId(FeedNode n) {
+        return switch (n) {
+            case FeedNode.Category c    -> "cat:" + c.path();
+            case FeedNode.Feed f        -> "feed:" + f.subscriptionId();
+            case FeedNode.Saved s       -> "saved:" + s.key();
+            case FeedNode.SavedSearch ss -> "search:" + ss.id();
+            case FeedNode.Bin b         -> "bin:" + b.id();
+        };
     }
 
     /**
@@ -587,7 +607,10 @@ public class HeadlinesView extends Div {
      * loaded headlines.
      */
     private void buildFeedTreeData() {
-        feedData = new TreeData<>();
+        // Reuse the SAME TreeData instance so the existing provider (and the TreeGrid's expansion state)
+        // survives a rebuild; only its contents are swapped out.
+        if (feedData == null) feedData = new TreeData<>();
+        else feedData.clear();
         // UNREAD counts per feed (RSSOwl shows unread, not total). Recomputed from the in-memory items,
         // so refreshTreeCounts() reflects read/unread changes without a DB round-trip.
         Map<String, Long> unreadByFeed = allItems.stream().filter(NewsItem::unread)
@@ -913,6 +936,7 @@ public class HeadlinesView extends Div {
         headlines.addItemClickListener(e -> {
             if (!(e.getItem() instanceof Row.ItemRow ir)) return;
             long id = ir.news().id();
+            boolean opening = false;
             if (e.isMetaKey() || e.isCtrlKey()) {
                 if (!selectedIds.remove(id)) selectedIds.add(id);
                 selectionAnchorId = id;
@@ -921,9 +945,11 @@ public class HeadlinesView extends Div {
                 selectionAnchorId = id;
             } else {
                 selectedIds.clear(); selectedIds.add(id); selectionAnchorId = id;
+                opening = true;                   // a plain click OPENS the article in the reader
             }
-            selected.set(ir.news());              // reader shows the clicked item
-            scheduleAutoMarkRead(ir.news());
+            if (opening) markReadOnOpen(ir.news()); // RSSOwl: opening an article marks it read (de-bold + count--)
+            selected.set(ir.news());              // reader shows the clicked item (already read → "Mark unread")
+            scheduleAutoMarkRead(ir.news());       // (no-op once read; still honors the "after viewing" delay)
             headlines.getDataProvider().refreshAll(); // restyle selection highlight
         });
         headlines.addItemDoubleClickListener(e -> {
@@ -1275,6 +1301,20 @@ public class HeadlinesView extends Div {
         }
         if (a < 0 || b < 0) { selectedIds.add(clickId); return; }
         for (int i = Math.min(a, b); i <= Math.max(a, b); i++) selectedIds.add(shown.get(i).id());
+    }
+
+    /**
+     * RSSOwl marks an article read the moment you open it. Called on a plain click (which shows the
+     * item in the reader): de-bolds the row and drops the feed/folder unread count by one. No-op if the
+     * item is already read. Distinct from the opt-in "Mark read after viewing" dwell timer
+     * ({@link #scheduleAutoMarkRead}), which handles marking read while browsing without opening.
+     */
+    private void markReadOnOpen(NewsItem it) {
+        if (it == null || !it.unread()) return;
+        it.setRead(true);
+        news.setRead(subject, it.id(), true);            // persist per-user
+        headlines.getDataProvider().refreshItem(new Row.ItemRow(it)); // de-bold this row
+        refreshTreeCounts();                             // e.g. Fast Company (35) -> (34)
     }
 
     private void markReadBulk(List<Row.ItemRow> rows, boolean read) {
