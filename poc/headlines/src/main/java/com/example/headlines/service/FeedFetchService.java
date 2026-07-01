@@ -214,7 +214,7 @@ public class FeedFetchService {
                 if (link == null || link.isBlank()) continue;
                 boolean att = e.getEnclosures() != null && !e.getEnclosures().isEmpty();
                 out.add(new Raw(link, blankTo(e.getTitle(), "(untitled)").strip(),
-                        blankTo(e.getAuthor(), "Unknown"),
+                        e.getAuthor() == null ? "" : e.getAuthor().strip(), // leave blank when absent (RSSOwl-style)
                         toLocalDateTime(e.getPublishedDate() != null ? e.getPublishedDate() : e.getUpdatedDate()),
                         att, extractContent(e)));
             }

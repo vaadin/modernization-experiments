@@ -16,15 +16,26 @@ vaadin-grid::part(sticky) {
     background-color: #fffdb4 !important;       /* needs !important to beat Aura's internal cell bg */
 }
 
+/* Custom selection highlight (the grid runs in NONE mode; we mark selected rows ourselves). */
+vaadin-grid::part(selected) {
+    background-color: var(--lumo-primary-color-10pct, #d6e4f5) !important;
+}
+
 /* Group header rows (RSSOwl's EntityGroup rows: bold, tinted background). */
 vaadin-grid::part(group) {
     font-weight: 600;
     background-color: #eef2f7 !important;
 }
 
-/* Left feeds-tree: category (folder) rows in bold, like RSSOwl's BookMarkExplorer. */
-vaadin-grid::part(feed-category) {
+/* Left feeds-tree: folders/feeds with unread items in bold (RSSOwl bolds anything with unread),
+   normal + greyed once everything is read. */
+vaadin-grid::part(feed-category),
+vaadin-grid::part(feed-unread) {
     font-weight: 600;
+}
+vaadin-grid::part(feed-category-read) {
+    font-weight: 400;
+    color: var(--vaadin-text-color-secondary, #888);
 }
 
 /* Saved-search smart folders (Unread/Today/...) in italic to set them apart. */

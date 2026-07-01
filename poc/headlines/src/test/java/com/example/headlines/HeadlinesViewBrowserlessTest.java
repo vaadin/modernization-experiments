@@ -26,6 +26,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -80,9 +81,10 @@ class HeadlinesViewBrowserlessTest extends BrowserlessTest {
         assertTrue(buttonTexts.contains("Add feed"), "Add feed button present");
         assertTrue(buttonTexts.contains("Log out"), "Log out button present");
 
-        // the headlines grid is multi-select (RSSOwl's news table allows bulk selection)
+        // the headlines grid uses custom (NONE-mode) desktop-style selection — no checkbox column, so
+        // its model is NOT a GridMultiSelectionModel (selection is tracked by the view via item-click).
         boolean anyMulti = $(TreeGrid.class).all().stream()
                 .anyMatch(g -> g.getSelectionModel() instanceof com.vaadin.flow.component.grid.GridMultiSelectionModel);
-        assertTrue(anyMulti, "headlines grid uses multi-select");
+        assertFalse(anyMulti, "headlines grid uses custom click-based selection, not the checkbox model");
     }
 }

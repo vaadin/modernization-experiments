@@ -101,6 +101,9 @@ public class HeadlinesView extends Div {
     private GridMenuItem<Row> labelRoot; // the context-menu "Label" submenu, repopulated on label CRUD
     private GridMenuItem<Row> binRoot;   // the context-menu "Add to bin" submenu, repopulated on bin CRUD
     private Long currentBinId;           // non-null when a news bin is the current tree selection
+    // Custom desktop-style selection (we run the grid in NONE mode and track selection ourselves).
+    private final java.util.LinkedHashSet<Long> selectedIds = new java.util.LinkedHashSet<>();
+    private Long selectionAnchorId;      // anchor for Shift-range selection
 
     private List<NewsItem> allItems; // reloaded after add/unsubscribe
     private List<NewsItem> currentItems; // the feed/folder/smart-folder selection
@@ -128,7 +131,7 @@ public class HeadlinesView extends Div {
                 return t;
             });
     private java.util.concurrent.ScheduledFuture<?> pendingAutoRead;
-    private boolean autoReadEnabled = true;
+    private boolean autoReadEnabled = false; // opt-in: browsing shouldn't silently de-bold unread items
 
     private final UserNewsService news;
     private final FeedFetchService feedFetch;
@@ -266,9 +269,15 @@ public class HeadlinesView extends Div {
         feedDataProvider = new TreeDataProvider<>(feedData, HierarchyFormat.FLATTENED);
         feedTree.addHierarchyColumn(FeedNode::label).setHeader("Feeds");
         feedTree.setDataProvider(feedDataProvider);
-        feedTree.setPartNameGenerator(n -> n instanceof FeedNode.Category ? "feed-category"
-                : (n instanceof FeedNode.Saved || n instanceof FeedNode.SavedSearch || n instanceof FeedNode.Bin)
-                ? "feed-saved" : null);
+        // Bold feeds/folders with unread, normal (greyed) when all read — RSSOwl-style. Smart folders,
+        // saved searches and bins stay italic.
+        feedTree.setPartNameGenerator(n -> {
+            if (n instanceof FeedNode.Category c) return c.count() > 0 ? "feed-category" : "feed-category-read";
+            if (n instanceof FeedNode.Feed f) return f.count() > 0 ? "feed-unread" : null;
+            if (n instanceof FeedNode.Saved || n instanceof FeedNode.SavedSearch || n instanceof FeedNode.Bin)
+                return "feed-saved";
+            return null;
+        });
         enableFeedDragAndDrop();
 
         feedTree.addSelectionListener(e -> {
@@ -510,6 +519,14 @@ public class HeadlinesView extends Div {
         applyGrouping(currentGroupBy);
     }
 
+    /** Rebuild only the feeds-tree counts/bolding from the in-memory items (no DB reload, keeps the
+     *  current selection/grid). Called after read/sticky/label changes so unread counts stay live. */
+    private void refreshTreeCounts() {
+        buildFeedTreeData(); // reads the (already-updated) allItems; recomputes unread counts
+        feedDataProvider = new TreeDataProvider<>(feedData, HierarchyFormat.FLATTENED);
+        feedTree.setDataProvider(feedDataProvider);
+    }
+
     /**
      * (Re)builds the tree's {@link TreeData} from the current user's persisted {@code Subscription}s.
      * Folders nest to any depth from the subscription's folder <em>path</em> ({@code "Computers/Windows"}),
@@ -521,20 +538,22 @@ public class HeadlinesView extends Div {
      */
     private void buildFeedTreeData() {
         feedData = new TreeData<>();
-        Map<String, Long> countByFeed = allItems.stream()
+        // UNREAD counts per feed (RSSOwl shows unread, not total). Recomputed from the in-memory items,
+        // so refreshTreeCounts() reflects read/unread changes without a DB round-trip.
+        Map<String, Long> unreadByFeed = allItems.stream().filter(NewsItem::unread)
                 .collect(Collectors.groupingBy(NewsItem::feed, Collectors.counting()));
 
-        // Feeds in OPML order; each folder records its descendants' total count and earliest position.
+        // Feeds in OPML order; each folder records its descendants' unread count and earliest position.
         List<UserNewsService.FeedRef> ordered = new ArrayList<>(news.feedRefs(subject));
         ordered.sort(Comparator.comparingInt(UserNewsService.FeedRef::position));
 
         Map<String, List<UserNewsService.FeedRef>> directFeeds = new LinkedHashMap<>(); // path ("" = root) -> feeds
-        Map<String, Integer> countByPath = new HashMap<>(); // folder path -> total items (incl. sub-folders)
+        Map<String, Integer> countByPath = new HashMap<>(); // folder path -> unread total (incl. sub-folders)
         Map<String, Integer> posByPath = new HashMap<>();    // folder path -> min OPML position (ordering key)
         Set<String> catPaths = new LinkedHashSet<>();
         for (UserNewsService.FeedRef r : ordered) {
             String folder = folderOf(r.folder()); // "" for a loose top-level channel
-            int cnt = countByFeed.getOrDefault(r.title(), 0L).intValue();
+            int cnt = unreadByFeed.getOrDefault(r.title(), 0L).intValue();
             directFeeds.computeIfAbsent(folder, k -> new ArrayList<>()).add(r);
             String acc = "";
             for (String seg : folder.isEmpty() ? new String[0] : folder.split("/")) {
@@ -546,7 +565,7 @@ public class HeadlinesView extends Div {
         }
 
         List<String> savedOrder = news.folderOrder(subject); // top-level folder drag order, if any
-        addFeedTreeLevel("", null, directFeeds, catPaths, countByPath, posByPath, countByFeed, savedOrder);
+        addFeedTreeLevel("", null, directFeeds, catPaths, countByPath, posByPath, unreadByFeed, savedOrder);
 
         for (String[] s : SAVED) {
             int c = (int) allItems.stream().filter(savedPredicate(s[1])).count();
@@ -568,7 +587,7 @@ public class HeadlinesView extends Div {
     private void addFeedTreeLevel(String parentPath, FeedNode.Category parentNode,
             Map<String, List<UserNewsService.FeedRef>> directFeeds, Set<String> catPaths,
             Map<String, Integer> countByPath, Map<String, Integer> posByPath,
-            Map<String, Long> countByFeed, List<String> savedOrder) {
+            Map<String, Long> unreadByFeed, List<String> savedOrder) {
         // Combined, position-ordered list of this level's children: sub-folder paths and feed refs.
         List<Object> children = new ArrayList<>();
         catPaths.stream().filter(p -> isDirectChild(parentPath, p)).forEach(children::add);
@@ -579,12 +598,12 @@ public class HeadlinesView extends Div {
             if (child instanceof String cp) {
                 FeedNode.Category cat = new FeedNode.Category(cp, lastSegment(cp), countByPath.getOrDefault(cp, 0));
                 feedData.addItem(parentNode, cat);
-                addFeedTreeLevel(cp, cat, directFeeds, catPaths, countByPath, posByPath, countByFeed, savedOrder);
+                addFeedTreeLevel(cp, cat, directFeeds, catPaths, countByPath, posByPath, unreadByFeed, savedOrder);
             } else {
                 UserNewsService.FeedRef r = (UserNewsService.FeedRef) child;
                 feedData.addItem(parentNode, new FeedNode.Feed(r.title(),
                         parentPath.isEmpty() ? "Uncategorized" : parentPath,
-                        countByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId(),
+                        unreadByFeed.getOrDefault(r.title(), 0L).intValue(), r.subscriptionId(),
                         r.url(), r.authUsername()));
             }
         }
@@ -741,9 +760,9 @@ public class HeadlinesView extends Div {
         MenuBar columnsMenu = new MenuBar();
         columnsMenu.addThemeVariants(MenuBarVariant.LUMO_TERTIARY, MenuBarVariant.LUMO_SMALL);
         SubMenu cols = columnsMenu.addItem("Columns").getSubMenu();
-        addColumnToggle(cols, "author", "Author");
-        addColumnToggle(cols, "feed", "Feed");
         addColumnToggle(cols, "date", "Date");
+        addColumnToggle(cols, "author", "Author");
+        addColumnToggle(cols, "category", "Category");
 
         // News filters (RSSOwl's rules engine: match conditions → actions).
         Button filters = new Button("Filters", VaadinIcon.FILTER.create(),
@@ -791,27 +810,16 @@ public class HeadlinesView extends Div {
     private void configureHeadlines() {
         headlines.setSizeFull();
         headlines.addThemeVariants(GridVariant.LUMO_ROW_STRIPES, GridVariant.LUMO_NO_BORDER);
-        // RSSOwl's news table is multi-select (Ctrl/Shift-click) for bulk actions; the reader shows the
-        // first of the selection. Context-menu actions below operate on the whole selection.
-        headlines.setSelectionMode(TreeGrid.SelectionMode.MULTI);
+        // Custom desktop-style selection (RSSOwl): plain click selects one, Cmd/Ctrl toggles, Shift
+        // ranges — NO checkbox column (Vaadin's MULTI mode forces one, so we drive selection ourselves).
+        headlines.setSelectionMode(TreeGrid.SelectionMode.NONE);
 
-        headlines.addComponentColumn(row -> itemOnly(row, this::stateIcon))
-                .setHeader("").setKey("status").setWidth("46px").setFlexGrow(0)
-                .setComparator(rowCmp(Comparator.comparingInt(NewsItem::statusRank))).setSortable(true);
-
+        // Columns match the original's News table: Title · Date · Author · Category. The read/unread
+        // state is an icon inside the Title cell (as in RSSOwl), not a separate column; there are no
+        // inline read/sticky toggle columns (those actions live in the context menu + reader footer).
         headlines.addComponentHierarchyColumn(this::titleComponent)
                 .setHeader("Title").setKey("title").setFlexGrow(3).setResizable(true)
                 .setComparator(rowCmp(Comparator.comparing(NewsItem::title, String.CASE_INSENSITIVE_ORDER)))
-                .setSortable(true);
-
-        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().author() : "")
-                .setHeader("Author").setKey("author").setFlexGrow(1).setResizable(true)
-                .setComparator(rowCmp(Comparator.comparing(NewsItem::author, String.CASE_INSENSITIVE_ORDER)))
-                .setSortable(true);
-
-        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().feed() : "")
-                .setHeader("Feed").setKey("feed").setFlexGrow(1).setResizable(true)
-                .setComparator(rowCmp(Comparator.comparing(NewsItem::feed, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
         dateColumn = headlines.addColumn(row -> {
@@ -820,14 +828,19 @@ public class HeadlinesView extends Div {
                     }
                     return "";
                 })
-                .setHeader("Date").setKey("date").setWidth("160px").setFlexGrow(0).setResizable(true)
+                .setHeader("Date").setKey("date").setWidth("150px").setFlexGrow(0).setResizable(true)
                 .setSortable(true);
         applyDateNullPolicy(true); // default view is date DESC — keep undated rows last, not first
 
-        headlines.addComponentColumn(row -> row instanceof Row.ItemRow ir ? readToggle(ir) : new Span())
-                .setHeader("").setKey("read").setWidth("46px").setFlexGrow(0);
-        headlines.addComponentColumn(row -> row instanceof Row.ItemRow ir ? stickyToggle(ir) : new Span())
-                .setHeader("").setKey("sticky").setWidth("46px").setFlexGrow(0);
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().author() : "")
+                .setHeader("Author").setKey("author").setFlexGrow(1).setResizable(true)
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::author, String.CASE_INSENSITIVE_ORDER)))
+                .setSortable(true);
+
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().category() : "")
+                .setHeader("Category").setKey("category").setFlexGrow(1).setResizable(true)
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::category, String.CASE_INSENSITIVE_ORDER)))
+                .setSortable(true);
 
         headlines.setPartNameGenerator(row -> {
             if (row instanceof Row.GroupRow) return "group";
@@ -835,17 +848,26 @@ public class HeadlinesView extends Div {
             StringBuilder sb = new StringBuilder();
             if (ir.news().unread()) sb.append("unread");
             if (ir.news().sticky()) sb.append(sb.isEmpty() ? "" : " ").append("sticky");
+            if (selectedIds.contains(ir.news().id())) sb.append(sb.isEmpty() ? "" : " ").append("selected");
             return sb.isEmpty() ? null : sb.toString();
         });
 
-        // Click a headline to read it (and arm auto-mark-read). The grid is MULTI-select, where a
-        // row-body click does NOT change selection (only the checkbox column does) — so the reader is
-        // wired to item-click, decoupling "read this one" from "select these for a bulk action".
+        // Desktop-style click selection: plain = select one + open; Cmd/Ctrl = toggle; Shift = range.
         headlines.addItemClickListener(e -> {
-            if (e.getItem() instanceof Row.ItemRow ir) {
-                selected.set(ir.news());
-                scheduleAutoMarkRead(ir.news());
+            if (!(e.getItem() instanceof Row.ItemRow ir)) return;
+            long id = ir.news().id();
+            if (e.isMetaKey() || e.isCtrlKey()) {
+                if (!selectedIds.remove(id)) selectedIds.add(id);
+                selectionAnchorId = id;
+            } else if (e.isShiftKey() && selectionAnchorId != null) {
+                selectRange(selectionAnchorId, id);
+                selectionAnchorId = id;
+            } else {
+                selectedIds.clear(); selectedIds.add(id); selectionAnchorId = id;
             }
+            selected.set(ir.news());              // reader shows the clicked item
+            scheduleAutoMarkRead(ir.news());
+            headlines.getDataProvider().refreshAll(); // restyle selection highlight
         });
         headlines.addItemDoubleClickListener(e -> {
             if (e.getItem() instanceof Row.ItemRow ir) openLink(ir.news());
@@ -986,13 +1008,12 @@ public class HeadlinesView extends Div {
             }
             H3 title = new H3(it.title());
             if (it.labelColor() != null) title.getStyle().set("color", it.labelColor());
-            Paragraph meta = new Paragraph(
-                    (it.date() == null ? "—" : DATE_FMT.format(it.date()))
-                            + "  ·  " + it.feed() + "  ·  " + it.author() + "  ·  " + it.state());
+            // Meta line: date · feed · author (author omitted when blank; no raw state enum).
+            String metaText = (it.date() == null ? "—" : DATE_FMT.format(it.date())) + "  ·  " + it.feed()
+                    + (it.author() == null || it.author().isBlank() ? "" : "  ·  " + it.author());
+            Paragraph meta = new Paragraph(metaText);
             meta.getStyle().set("color", "var(--vaadin-text-color-secondary, gray)");
-            Anchor link = new Anchor(it.link(), "Open original ↗");
-            link.setTarget("_blank");
-            reader.add(title, meta, link);
+            reader.add(title, meta);
 
             // The feed's own article HTML, rendered inline (RSSOwl uses an embedded browser; here it's
             // a sanitized Html fragment — Vaadin's Html does NOT sanitize, so we clean it with jsoup).
@@ -1000,8 +1021,41 @@ public class HeadlinesView extends Div {
             if (!body.isBlank()) {
                 reader.add(new Html("<div class=\"article-content\">" + body + "</div>"));
             }
+
+            reader.add(buildReaderFooter(it)); // per-article action bar (RSSOwl's footer toolbar)
         });
         return reader;
+    }
+
+    /** The per-article action bar under the reader (RSSOwl shows Sticky · Label · … · Full Content).
+     *  Wired to the same per-user actions as the grid, acting on the shown item. */
+    private Component buildReaderFooter(NewsItem it) {
+        Row.ItemRow ir = new Row.ItemRow(it);
+        Button read = new Button(it.unread() ? "Mark read" : "Mark unread",
+                new Icon(it.unread() ? VaadinIcon.ENVELOPE_OPEN : VaadinIcon.ENVELOPE),
+                e -> { markReadBulk(List.of(ir), it.unread()); selected.set(it); });
+        Button sticky = new Button(it.sticky() ? "Remove sticky" : "Make sticky", new Icon(VaadinIcon.PIN),
+                e -> { setStickyBulk(List.of(ir), !it.sticky()); selected.set(it); });
+
+        // Label menu built from the user's managed labels (toggles the label on this item).
+        MenuBar labelBar = new MenuBar();
+        labelBar.addThemeVariants(MenuBarVariant.LUMO_TERTIARY, MenuBarVariant.LUMO_SMALL);
+        SubMenu labelMenu = labelBar.addItem(new Icon(VaadinIcon.TAG), "Label").getSubMenu();
+        for (NewsItem.LabelRef lr : userLabels) {
+            labelMenu.addItem(lr.name(), e -> { toggleLabelBulk(List.of(ir), lr.id()); selected.set(it); });
+        }
+        labelMenu.addItem("Clear labels", e -> { clearLabelsBulk(List.of(ir)); selected.set(it); });
+
+        Anchor open = new Anchor(it.link(), "Full Content ↗");
+        open.setTarget("_blank");
+        open.getStyle().set("align-self", "center").set("font-size", "var(--lumo-font-size-s)");
+
+        for (Button b : new Button[]{read, sticky}) b.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        HorizontalLayout footer = new HorizontalLayout(sticky, labelBar, read, open);
+        footer.setAlignItems(FlexComponent.Alignment.CENTER);
+        footer.getStyle().set("margin-top", "1rem").set("border-top", "1px solid var(--lumo-contrast-10pct)")
+                .set("padding-top", "0.5rem").set("flex-wrap", "wrap");
+        return footer;
     }
 
     private void buildContextMenu() {
@@ -1110,13 +1164,16 @@ public class HeadlinesView extends Div {
             news.setLabels(subject, ir.news().id(), ids);
             applyLabelsToItem(ir, ids);
         }
+        refreshTreeCounts(); // "Labeled News" smart-folder count changed
     }
 
     private void clearLabelsBulk(List<Row.ItemRow> rows) {
+        if (rows.isEmpty()) return;
         for (Row.ItemRow ir : rows) {
             news.setLabels(subject, ir.news().id(), java.util.Set.of());
             applyLabelsToItem(ir, java.util.Set.of());
         }
+        refreshTreeCounts();
     }
 
     /** Reflect a new label-id set onto the in-memory NewsItem (resolving names/colours) and refresh the row. */
@@ -1140,28 +1197,46 @@ public class HeadlinesView extends Div {
      * of it (and there's more than one), otherwise just the right-clicked row. Group rows are excluded.
      */
     private List<Row.ItemRow> actionTargets(Row clicked) {
-        Set<Row> selectedRows = headlines.getSelectedItems();
-        if (clicked != null && selectedRows.contains(clicked) && selectedRows.size() > 1) {
-            return selectedRows.stream().filter(r -> r instanceof Row.ItemRow)
-                    .map(r -> (Row.ItemRow) r).toList();
+        // If the right-clicked row is part of a multi-selection, act on the whole selection; else just it.
+        if (clicked instanceof Row.ItemRow ir && selectedIds.contains(ir.news().id()) && selectedIds.size() > 1) {
+            return displayedItems().stream().filter(n -> selectedIds.contains(n.id()))
+                    .map(Row.ItemRow::new).toList();
         }
-        return clicked instanceof Row.ItemRow ir ? List.of(ir) : List.of();
+        return clicked instanceof Row.ItemRow ir2 ? List.of(ir2) : List.of();
+    }
+
+    /** Select every item between the anchor and the clicked id, in the currently displayed order
+     *  (Shift-range). Falls back to just the clicked id if either isn't in the current view. */
+    private void selectRange(long anchorId, long clickId) {
+        List<NewsItem> shown = displayedItems();
+        int a = -1, b = -1;
+        for (int i = 0; i < shown.size(); i++) {
+            long id = shown.get(i).id();
+            if (id == anchorId) a = i;
+            if (id == clickId) b = i;
+        }
+        if (a < 0 || b < 0) { selectedIds.add(clickId); return; }
+        for (int i = Math.min(a, b); i <= Math.max(a, b); i++) selectedIds.add(shown.get(i).id());
     }
 
     private void markReadBulk(List<Row.ItemRow> rows, boolean read) {
+        if (rows.isEmpty()) return;
         for (Row.ItemRow ir : rows) {
             ir.news().setRead(read);
             news.setRead(subject, ir.news().id(), read); // persist per-user
             headlines.getDataProvider().refreshItem(ir);
         }
+        refreshTreeCounts(); // unread counts changed
     }
 
     private void setStickyBulk(List<Row.ItemRow> rows, boolean sticky) {
+        if (rows.isEmpty()) return;
         for (Row.ItemRow ir : rows) {
             ir.news().setSticky(sticky);
             news.setSticky(subject, ir.news().id(), sticky); // persist per-user
             headlines.getDataProvider().refreshItem(ir);
         }
+        refreshTreeCounts(); // "Sticky News" smart-folder count changed
     }
 
     // --- cell components ---
@@ -1175,24 +1250,19 @@ public class HeadlinesView extends Div {
         NewsItem n = ((Row.ItemRow) row).news();
         Span s = new Span(n.title());
         if (n.labelColor() != null) s.getStyle().set("color", n.labelColor());
-        if (n.labels().isEmpty()) return s;
-        // Show a small colour chip per assigned label after the title (multi-label, RSSOwl-style).
-        HorizontalLayout row2 = new HorizontalLayout(s);
-        row2.setSpacing(false);
-        row2.setAlignItems(FlexComponent.Alignment.CENTER);
-        row2.getStyle().set("gap", "4px");
+        // The read/unread state icon lives on the Title (as in RSSOwl), followed by any label chips.
+        HorizontalLayout cell = new HorizontalLayout(stateIcon(n), s);
+        cell.setSpacing(false);
+        cell.setAlignItems(FlexComponent.Alignment.CENTER);
+        cell.getStyle().set("gap", "6px");
         for (NewsItem.LabelRef lr : n.labels()) {
             Span chip = new Span();
             chip.getElement().setAttribute("title", lr.name());
             chip.getStyle().set("display", "inline-block").set("width", "9px").set("height", "9px")
                     .set("border-radius", "50%").set("background-color", lr.color()).set("margin-left", "2px");
-            row2.add(chip);
+            cell.add(chip);
         }
-        return row2;
-    }
-
-    private Component itemOnly(Row row, java.util.function.Function<NewsItem, Component> fn) {
-        return row instanceof Row.ItemRow ir ? fn.apply(ir.news()) : new Span();
+        return cell;
     }
 
     private Icon stateIcon(NewsItem it) {
@@ -1206,26 +1276,6 @@ public class HeadlinesView extends Div {
         });
         icon.getElement().setAttribute("title", it.state().name());
         return icon;
-    }
-
-    private Button readToggle(Row.ItemRow ir) {
-        NewsItem it = ir.news();
-        Button b = new Button(new Icon(it.unread() ? VaadinIcon.ENVELOPE : VaadinIcon.ENVELOPE_OPEN));
-        b.addThemeVariants(ButtonVariant.LUMO_TERTIARY_INLINE, ButtonVariant.LUMO_SMALL);
-        b.getElement().setAttribute("title", it.unread() ? "Mark read" : "Mark unread");
-        b.addClickListener(e -> toggleReadAndRefresh(ir));
-        return b;
-    }
-
-    private Button stickyToggle(Row.ItemRow ir) {
-        NewsItem it = ir.news();
-        Button b = new Button(new Icon(VaadinIcon.PIN));
-        b.addThemeVariants(ButtonVariant.LUMO_TERTIARY_INLINE, ButtonVariant.LUMO_SMALL);
-        b.getElement().getStyle().set("color",
-                it.sticky() ? "#c9a200" : "var(--vaadin-text-color-secondary, #bbb)");
-        b.getElement().setAttribute("title", it.sticky() ? "Remove sticky" : "Make sticky");
-        b.addClickListener(e -> toggleStickyAndRefresh(ir));
-        return b;
     }
 
     // --- actions ---
@@ -1252,24 +1302,9 @@ public class HeadlinesView extends Div {
                 cur.setRead(true);
                 news.setRead(subject, id, true); // persist per-user
                 headlines.getDataProvider().refreshItem(new Row.ItemRow(cur));
+                refreshTreeCounts(); // unread count dropped by one
             }
         }), AUTO_READ_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
-    }
-
-    private void toggleReadAndRefresh(Row row) {
-        if (row instanceof Row.ItemRow ir) {
-            ir.news().toggleRead();
-            news.setRead(subject, ir.news().id(), !ir.news().unread()); // persist per-user
-            headlines.getDataProvider().refreshItem(ir);
-        }
-    }
-
-    private void toggleStickyAndRefresh(Row row) {
-        if (row instanceof Row.ItemRow ir) {
-            ir.news().toggleSticky();
-            news.setSticky(subject, ir.news().id(), ir.news().sticky()); // persist per-user
-            headlines.getDataProvider().refreshItem(ir);
-        }
     }
 
     private void openLink(NewsItem it) {
