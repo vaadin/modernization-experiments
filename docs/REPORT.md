@@ -1055,6 +1055,58 @@ and a **"Remove from this bin"** action shown only while a bin is open; right-cl
 With news bins, **every RSSOwl subsystem that makes sense on the web is now built.** What remains —
 keyboard navigation and Google-Reader sync — is polish or impossible (see the findings below).
 
+### Day 18 — a nitpicking reviewer pass (both apps, side by side)
+
+With the feature build complete, we ran a deliberately picky **behavioural** review: drive the original
+**RSSOwlnix** and the Vaadin app together, screenshot both, and hunt for every difference and
+sub-elegant choice — then fix the ones worth fixing. The brief (verbatim):
+
+> *"assume the role of a thorough reviewer… use screenshots and playwright and computer use to operate
+> both the old and the new application. Be nitpicking… why it seems impossible that the old application
+> and the Alice account can never have the same feeds… the number of news items seems to never be the
+> same… when reading one, the number of unread items does not go down… the font is always bold [old] but
+> often not in Vaadin… Why did I not see 'Login:' dialogs… Why is the 'add feed' dialog so narrow…? Why
+> does a single click not select…? Can we mimic the original with multi-select on Command/Shift instead
+> of the checkbox? Why … unknown Author as 'Unknown' instead of empty? … do we use the same columns…?
+> Under every post there is a button line on the bottom, why are we lacking it? … maintain a list with
+> defects … and how they can be mitigated."*
+
+Screenshots: original vs before/after in [`after/qa/`](after/qa/).
+
+![The original RSSOwlnix: Title·Date·Author·Category columns, bold unread, unread tree-counts, and a per-article footer toolbar](after/qa/original-rssowlnix.png)
+
+![The Vaadin grid after the pass: Title·Date·Author·Category, state icon on the title, no checkbox/toggle columns](after/qa/after-grid.png)
+
+**What the side-by-side surfaced, and what we did about it.** Every complaint was reproduced by
+operating both apps; the fixes are verified in-browser.
+
+| # | Finding (original ➜ ours) | Verdict | Resolution |
+|---|---|---|---|
+| D1 | Reading an item didn't drop the tree's unread count | 🔴 fixed | Counts refresh live on read/sticky/label (`refreshTreeCounts()`), no DB round-trip |
+| D2 | Tree counts were **total** items; RSSOwl shows **unread** | 🔴 fixed | Counts are unread; hidden at 0; node bold w/ unread, greyed when all read |
+| D3 | "Unread often not bold" | 🟡 explained+fixed | Bold *was* applied (verified `font-weight:600` incl. title — the exploration agent's "won't cascade" theory was wrong); the real cause was **auto-mark-read (on by default)** silently de-bolding browsed items while the stale count didn't move. Auto-read now **off by default**; counts live |
+| D4 | Single click didn't select; checkbox-only multi | 🔴 fixed | Custom desktop selection: `SelectionMode.NONE` + own id-set — plain click selects+opens, Cmd/Ctrl toggles, **Shift ranges**, no checkbox column |
+| D5 | Wrong columns (status/Title/Author/**Feed**/Date + read+sticky toggles) | 🔴 fixed | Now **Title · Date · Author · Category** with the state icon on the Title and no toggle columns — matching RSSOwl |
+| D6 | Reader had no per-article footer | 🔴 fixed | Footer action bar: Sticky · Label · Mark read · Full Content |
+| D7 | Missing author shown as "Unknown" | 🔴 fixed | Left blank, like the original |
+| D9 | "Never the same number of items" | 🟢+🔴 | Partly inherent (live feeds fetched at different moments) — documented; partly a bug: our ROME parser rejected **DOCTYPE** feeds (83 skips) — `setAllowDoctypes(true)` recovered them (**83 ➜ 0**); and the counts now measure the same thing (unread, per D2) |
+| D8/D15 | Add-feed dialog too narrow/cramped; inconsistent dialog widths | 🟡 fixed | 460px, credentials behind a disclosure; explicit widths across dialogs |
+| D11 | Absolute timestamps vs RSSOwl's time-of-day | 🟡 fixed | Short/relative date: today ➜ time, this year ➜ "d MMM", else full |
+| D12 | Reader meta showed the raw `UNREAD` enum | 🟡 fixed | Removed; author omitted when blank |
+| D14 | No "Unread" view mode | 🟡 fixed | "Unread only" toggle in the toolbar |
+| D10 | No "Login:" dialogs ever appeared | 🟢 by design | Every default feed is public; the shared refresh fetches **anonymously** and skips 401s silently — and never uses one user's credentials for another (a security choice). The credentials dialog appears only on "Set credentials…" or adding an auth-gated feed. Documented, not changed |
+| — | Keyboard navigation (RCP global bindings) | 🟢 not done | Web-platform polish; left as a documented gap |
+| — | Google-Reader **sync**; true **embedded browser** | 🟢 won't do | Sync target is dead (2013); live-page embedding is blocked by `X-Frame-Options`/CSP — we render the feed's article HTML inline instead |
+
+**The honest meta-finding:** even with an identical seed, the two apps' item counts will never match —
+live feeds are fetched at different moments, some 2009 URLs are dead, and (until this pass) we counted
+totals while RSSOwl counts unread. The *tree* is now structurally comparable and the counts track reading
+the same way; the article sets remain necessarily divergent. And one nice reminder from D3: an
+exploration agent confidently asserted the unread-bold wouldn't reach the slotted title — inspecting the
+live DOM proved it did. Running it beats reasoning about it.
+
+_(Fixes landed in three commits: "Reviewer pass (1/3)…" through "(3/3)…". 55 tests green throughout.)_
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_
