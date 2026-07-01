@@ -44,9 +44,16 @@ vaadin-grid::part(feed-category-read) {
     color: var(--vaadin-text-color-secondary, #888);
 }
 
-/* Saved-search smart folders (Unread/Today/...) in italic to set them apart. */
+/* Saved-search smart folders (Unread/Today/...) in italic to set them apart; bold when they hold
+   unread news (like folders/feeds), normal + greyed once everything is read. */
 vaadin-grid::part(feed-saved) {
     font-style: italic;
+    font-weight: 600;
+}
+vaadin-grid::part(feed-saved-read) {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--vaadin-text-color-secondary, #888);
 }
 
 /* Reader pane: inline article HTML from the feed. Keep images/embeds inside the pane and give the

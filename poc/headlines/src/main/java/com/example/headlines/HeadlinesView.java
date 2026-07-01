@@ -292,8 +292,11 @@ public class HeadlinesView extends Div {
         feedTree.setPartNameGenerator(n -> {
             if (n instanceof FeedNode.Category c) return c.count() > 0 ? "feed-category" : "feed-category-read";
             if (n instanceof FeedNode.Feed f) return f.count() > 0 ? "feed-unread" : null;
-            if (n instanceof FeedNode.Saved || n instanceof FeedNode.SavedSearch || n instanceof FeedNode.Bin)
-                return "feed-saved";
+            // Smart folders / saved searches / bins: italic to set them apart, but still BOLD when they
+            // hold unread news (RSSOwl bolds anything with unread), normal+greyed once all read.
+            if (n instanceof FeedNode.Saved s) return s.count() > 0 ? "feed-saved" : "feed-saved-read";
+            if (n instanceof FeedNode.SavedSearch ss) return ss.count() > 0 ? "feed-saved" : "feed-saved-read";
+            if (n instanceof FeedNode.Bin b) return b.count() > 0 ? "feed-saved" : "feed-saved-read";
             return null;
         });
         enableFeedDragAndDrop();
