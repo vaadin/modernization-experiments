@@ -6,6 +6,12 @@ vaadin-grid::part(unread) {
     font-weight: 600;
 }
 
+/* Read rows are de-emphasised (greyed), like RSSOwl. Colour inherits into the slotted title text;
+   an explicitly-labelled title keeps its own colour. */
+vaadin-grid::part(read) {
+    color: var(--vaadin-text-color-secondary, #8a8a8a);
+}
+
 /* Sticky/flagged rows get RSSOwl's pale-yellow background (RGB 255,255,180).
    NOTE (finding): the Vaadin MCP styling docs say to set row backgrounds via
    --vaadin-grid-cell-background, but under the new Aura theme that custom property is ignored —

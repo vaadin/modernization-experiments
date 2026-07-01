@@ -334,16 +334,46 @@ public class HeadlinesView extends Div {
                     reloadUserData();
                     Notification.show("Bin deleted");
                 }));
+        // Mark all read on a feed or folder (RSSOwl staple), keyed off the node's scope.
+        GridMenuItem<FeedNode> markAllItem = feedMenu.addItem("Mark all read",
+                e -> e.getItem().ifPresent(this::markAllRead));
         feedMenu.setDynamicContentHandler(node -> {
             boolean feed = node instanceof FeedNode.Feed;
             boolean savedSearch = node instanceof FeedNode.SavedSearch;
             boolean bin = node instanceof FeedNode.Bin;
+            boolean folder = node instanceof FeedNode.Category;
             credItem.setVisible(feed);
             unsubItem.setVisible(feed);
             delSearchItem.setVisible(savedSearch);
             delBinItem.setVisible(bin);
-            return feed || savedSearch || bin; // no menu on folders / fixed smart folders
+            markAllItem.setVisible(feed || folder); // feeds and folders can be bulk-read
+            return feed || savedSearch || bin || folder;
         });
+    }
+
+    /** Mark every (currently-unread) item in the given feed or folder read — RSSOwl's "Mark all read". */
+    private void markAllRead(FeedNode node) {
+        java.util.function.Predicate<NewsItem> inScope;
+        String label;
+        if (node instanceof FeedNode.Feed f) {
+            inScope = n -> f.name().equals(n.feed());
+            label = f.name();
+        } else if (node instanceof FeedNode.Category c) {
+            String p = c.path();
+            inScope = n -> n.category() != null && (n.category().equals(p) || n.category().startsWith(p + "/"));
+            label = c.name();
+        } else {
+            return;
+        }
+        List<Long> ids = new ArrayList<>();
+        for (NewsItem n : allItems) {
+            if (n.unread() && inScope.test(n)) { n.setRead(true); ids.add(n.id()); }
+        }
+        if (ids.isEmpty()) { Notification.show("Nothing unread in " + label); return; }
+        news.setReadBulk(subject, ids, true);
+        applyGrouping(currentGroupBy); // re-render the grid (read styling)
+        refreshTreeCounts();
+        Notification.show("Marked " + ids.size() + " read in " + label);
     }
 
     /** A download link that serves the user's current subscriptions as an OPML file (RSSOwl-style export). */
@@ -873,10 +903,10 @@ public class HeadlinesView extends Div {
             if (row instanceof Row.GroupRow) return "group";
             Row.ItemRow ir = (Row.ItemRow) row;
             StringBuilder sb = new StringBuilder();
-            if (ir.news().unread()) sb.append("unread");
-            if (ir.news().sticky()) sb.append(sb.isEmpty() ? "" : " ").append("sticky");
-            if (selectedIds.contains(ir.news().id())) sb.append(sb.isEmpty() ? "" : " ").append("selected");
-            return sb.isEmpty() ? null : sb.toString();
+            if (ir.news().unread()) sb.append("unread"); else sb.append("read"); // read = greyed (RSSOwl)
+            if (ir.news().sticky()) sb.append(" sticky");
+            if (selectedIds.contains(ir.news().id())) sb.append(" selected");
+            return sb.toString();
         });
 
         // Desktop-style click selection: plain = select one + open; Cmd/Ctrl = toggle; Shift = range.

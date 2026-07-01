@@ -451,6 +451,12 @@ public class UserNewsService {
         upsert(subject, articleId, st -> st.setRead(read));
     }
 
+    /** Mark many articles read/unread in one transaction (RSSOwl's "Mark all read"). */
+    @Transactional
+    public void setReadBulk(String subject, java.util.Collection<Long> articleIds, boolean read) {
+        for (Long id : articleIds) upsert(subject, id, st -> st.setRead(read));
+    }
+
     @Transactional
     public void setSticky(String subject, long articleId, boolean sticky) {
         upsert(subject, articleId, st -> st.setSticky(sticky));
