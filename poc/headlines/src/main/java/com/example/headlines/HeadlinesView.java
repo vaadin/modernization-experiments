@@ -26,6 +26,7 @@ import com.vaadin.flow.component.contextmenu.MenuItem;
 import com.vaadin.flow.component.contextmenu.SubMenu;
 import com.vaadin.flow.component.menubar.MenuBar;
 import com.vaadin.flow.component.menubar.MenuBarVariant;
+import com.vaadin.flow.component.details.Details;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
@@ -89,7 +90,17 @@ import java.util.stream.Collectors;
 @PermitAll // any authenticated Keycloak user may open the app
 public class HeadlinesView extends Div {
 
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
+    private static final DateTimeFormatter DAY_FMT = DateTimeFormatter.ofPattern("d MMM");
+    private static final DateTimeFormatter FULL_FMT = DateTimeFormatter.ofPattern("d MMM yyyy");
+
+    /** RSSOwl-style short date: time-of-day for today, "d MMM" this year, else "d MMM yyyy". */
+    private static String shortDate(java.time.LocalDateTime d) {
+        if (d == null) return "";
+        java.time.LocalDate day = d.toLocalDate(), today = java.time.LocalDate.now();
+        if (day.equals(today)) return TIME_FMT.format(d);
+        return (day.getYear() == today.getYear() ? DAY_FMT : FULL_FMT).format(d);
+    }
 
     /** RSSOwl's default saved-search smart folders: {display name, predicate key}. */
     private static final String[][] SAVED = {
@@ -132,6 +143,7 @@ public class HeadlinesView extends Div {
             });
     private java.util.concurrent.ScheduledFuture<?> pendingAutoRead;
     private boolean autoReadEnabled = false; // opt-in: browsing shouldn't silently de-bold unread items
+    private boolean unreadOnly = false;      // RSSOwl's "Unread" view mode: show only unread items
 
     private final UserNewsService news;
     private final FeedFetchService feedFetch;
@@ -349,6 +361,7 @@ public class HeadlinesView extends Div {
     private void openImportOpmlDialog() {
         Dialog dialog = new Dialog();
         dialog.setHeaderTitle("Import OPML");
+        dialog.setWidth("460px");
         Paragraph hint = new Paragraph("Upload an OPML file to add its feeds to your subscriptions. "
                 + "Feeds you're already subscribed to are skipped.");
         hint.getStyle().set("color", "var(--vaadin-text-color-secondary, gray)");
@@ -392,6 +405,7 @@ public class HeadlinesView extends Div {
     private void openAddFeedDialog() {
         Dialog dialog = new Dialog();
         dialog.setHeaderTitle("Add feed");
+        dialog.setWidth("460px"); // wide enough to show the example URL in full
         TextField url = new TextField("Feed URL");
         url.setWidthFull();
         url.setPlaceholder("https://example.com/rss");
@@ -399,13 +413,17 @@ public class HeadlinesView extends Div {
         title.setWidthFull();
         TextField folder = new TextField("Folder (optional)");
         folder.setWidthFull();
-        // Optional HTTP credentials, like RSSOwl's per-feed authentication.
-        TextField user = new TextField("Username (optional)");
+        // Optional HTTP credentials (RSSOwl's per-feed auth), tucked behind a disclosure so the common
+        // "just paste a public feed URL" case stays clean.
+        TextField user = new TextField("Username");
         user.setWidthFull();
-        PasswordField pass = new PasswordField("Password (optional)");
+        PasswordField pass = new PasswordField("Password");
         pass.setWidthFull();
-        VerticalLayout form = new VerticalLayout(url, title, folder, user, pass);
+        Details creds = new Details("This feed requires a login", new VerticalLayout(user, pass));
+        creds.getElement().getStyle().set("width", "100%");
+        VerticalLayout form = new VerticalLayout(url, title, folder, creds);
         form.setPadding(false);
+        form.setSpacing(true);
         dialog.add(form);
 
         Button add = new Button("Add", e -> {
@@ -443,6 +461,7 @@ public class HeadlinesView extends Div {
         if (query == null || query.isBlank()) return;
         Dialog dialog = new Dialog();
         dialog.setHeaderTitle("Save search");
+        dialog.setWidth("460px");
         TextField name = new TextField("Name");
         name.setWidthFull();
         name.setValue(query); // sensible default: the query text
@@ -467,6 +486,7 @@ public class HeadlinesView extends Div {
     private void openCredentialsDialog(FeedNode.Feed feed) {
         Dialog dialog = new Dialog();
         dialog.setHeaderTitle("Feed requires authentication");
+        dialog.setWidth("460px");
         Span msg = new Span("Enter the username and password for \"" + feed.name() + "\".");
         TextField user = new TextField("Username");
         user.setWidthFull();
@@ -769,6 +789,12 @@ public class HeadlinesView extends Div {
                 e -> new FiltersDialog(news, subject, this::reloadUserData).open());
         filters.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
 
+        // "Unread only" view mode (RSSOwl's Unread tab).
+        Checkbox unreadOnlyBox = new Checkbox("Unread only");
+        unreadOnlyBox.setValue(unreadOnly);
+        unreadOnlyBox.getStyle().set("align-self", "center");
+        unreadOnlyBox.addValueChangeListener(e -> { unreadOnly = e.getValue(); applyGrouping(currentGroupBy); });
+
         // Auto-mark-read toggle (RSSOwl marks the displayed article read after a short delay).
         Checkbox autoRead = new Checkbox("Mark read after viewing");
         autoRead.setValue(autoReadEnabled);
@@ -785,7 +811,8 @@ public class HeadlinesView extends Div {
         Button logout = new Button("Log out", e -> authContext.logout());
         logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
 
-        HorizontalLayout bar = new HorizontalLayout(groupBy, search, saveSearch, columnsMenu, filters, autoRead, who, logout);
+        HorizontalLayout bar = new HorizontalLayout(groupBy, search, saveSearch, columnsMenu, filters,
+                unreadOnlyBox, autoRead, who, logout);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
         bar.setFlexGrow(1, who); // push logout to the right
@@ -824,7 +851,7 @@ public class HeadlinesView extends Div {
 
         dateColumn = headlines.addColumn(row -> {
                     if (row instanceof Row.ItemRow ir && ir.news().date() != null) {
-                        return DATE_FMT.format(ir.news().date());
+                        return shortDate(ir.news().date());
                     }
                     return "";
                 })
@@ -1009,7 +1036,7 @@ public class HeadlinesView extends Div {
             H3 title = new H3(it.title());
             if (it.labelColor() != null) title.getStyle().set("color", it.labelColor());
             // Meta line: date · feed · author (author omitted when blank; no raw state enum).
-            String metaText = (it.date() == null ? "—" : DATE_FMT.format(it.date())) + "  ·  " + it.feed()
+            String metaText = (it.date() == null ? "—" : shortDate(it.date())) + "  ·  " + it.feed()
                     + (it.author() == null || it.author().isBlank() ? "" : "  ·  " + it.author());
             Paragraph meta = new Paragraph(metaText);
             meta.getStyle().set("color", "var(--vaadin-text-color-secondary, gray)");
@@ -1122,6 +1149,7 @@ public class HeadlinesView extends Div {
     private void openNewBinDialog(List<Row.ItemRow> rows) {
         Dialog dialog = new Dialog();
         dialog.setHeaderTitle("New bin");
+        dialog.setWidth("460px");
         TextField name = new TextField("Name");
         name.setWidthFull();
         dialog.add(name);
@@ -1335,10 +1363,9 @@ public class HeadlinesView extends Div {
      * field-scoped {@code title:...} queries) — so search reaches beyond the loaded selection.
      */
     private List<NewsItem> displayedItems() {
-        if (searchTerm.isBlank()) {
-            return currentItems;
-        }
-        return news.search(subject, searchTerm);
+        List<NewsItem> base = searchTerm.isBlank() ? currentItems : news.search(subject, searchTerm);
+        if (unreadOnly) return base.stream().filter(NewsItem::unread).toList(); // RSSOwl's "Unread" view mode
+        return base;
     }
 
     private Comparator<Row> rowCmp(Comparator<NewsItem> itemCmp) {

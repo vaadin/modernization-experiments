@@ -208,7 +208,12 @@ public class FeedFetchService {
         }
         List<Raw> out = new ArrayList<>();
         try (InputStream in = resp.body()) {
-            SyndFeed feed = new SyndFeedInput().build(new XmlReader(in));
+            SyndFeedInput input = new SyndFeedInput();
+            // Many real feeds (incl. dozens of RSSOwl's 2009 defaults) carry a DOCTYPE; ROME rejects
+            // those by default ("DOCTYPE is disallowed"). Allow them so we don't silently drop feeds —
+            // external-entity resolution stays off, so this doesn't reopen the XXE hole.
+            input.setAllowDoctypes(true);
+            SyndFeed feed = input.build(new XmlReader(in));
             for (SyndEntry e : feed.getEntries()) {
                 String link = e.getLink();
                 if (link == null || link.isBlank()) continue;
