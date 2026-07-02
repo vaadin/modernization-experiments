@@ -1107,6 +1107,74 @@ live DOM proved it did. Running it beats reasoning about it.
 
 _(Fixes landed in three commits: "Reviewer pass (1/3)…" through "(3/3)…". 55 tests green throughout.)_
 
+### Day 19 — three UX fixes, and a genuinely interesting feed-parsing divergence
+
+Three small behavioural fixes first, each caught by using the app as a user would and verified live in
+the browser with Playwright:
+
+- **Opening an article now marks it read** (`markReadOnOpen`) — de-bolds the row and drops the feed's
+  unread count, RSSOwl's default. Previously read-on-view was gated behind the opt-in "Mark read after
+  viewing" timer, so a click showed the article but left it bold and the count unchanged.
+- **The feeds tree stopped collapsing on every read.** `FeedNode.Category` is a `record`, so its
+  value-equality includes the unread *count*; when a count changed, the recounted folder looked like a
+  brand-new item and the `TreeGrid` dropped its expansion. Fix: a **stable `getId`** on the data
+  provider (path / subscription id, *not* the whole record) plus refreshing **in place**
+  (`refreshAll()` on the same provider) instead of `setDataProvider(new …)`. A nice Vaadin lesson:
+  tree expansion is keyed by item identity — never fold a mutable display value into that identity.
+- **Smart folders now bold when they hold unread news** ("Today's News (1525)" was italic-but-never-bold
+  because its part was assigned unconditionally, ignoring the count).
+
+Then a more interesting one. Adding **`https://vaadin.com/blog/feed`** in the *original* RSSOwlnix makes
+you type a name by hand and can leave the bookmark empty; the Vaadin app just subscribes and shows the
+posts. The user asked the right question — *how does the original mess this up?* — so we read the source
+on both sides.
+
+**The feed is fine.** It's valid RSS 2.0 (`<title>Vaadin.com Blog</title>`, proper `<item><link>`s,
+173 KB), and every client — including a `RSSOwl/2.2` User-Agent — gets a clean `200`. The wrinkle is in
+the response headers: **there is no `Content-Type` header at all**, plus `X-Content-Type-Options:
+nosniff`. A modern CDN endpoint (Cloudflare, cookies, `no-cache`) simply doesn't bother to declare
+"this is a feed."
+
+**Why that trips the original.** RSSOwl identifies a feed through two positive-identification
+heuristics, and this URL defeats both:
+
+1. **URL-shape heuristic** — `URIUtils.looksLikeFeedLink()` only short-circuits to "treat as a direct
+   feed" when the URL carries a feed **file extension** (`.xml` / `.rss` / `.atom`) or the `feed://`
+   scheme. `…/blog/feed` has a bare path segment, no extension → *not* recognised, so the add-a-bookmark
+   flow is forced into content-type detection.
+2. **Content-Type heuristic** — `DefaultProtocolHandler.getFeed()` reads the HTTP `Content-Type` and
+   accepts the URL as a feed only if it matches `CoreUtils.FEED_MIME_TYPES`
+   (`application/rss+xml`, `application/atom+xml`, `application/rdf+xml`, JSON). With **no Content-Type**
+   it falls through to **HTML auto-discovery** (`CoreUtils.findFeed`), which scans the body line-by-line
+   for a `<link rel="alternate" type="application/rss+xml" href="…">` tag — the pattern a *web page*
+   uses to point at its feed. But the body *is* the feed, not an HTML page, and contains **zero** such
+   markers (verified: `grep -c 'application/rss+xml'` → 0). Detection returns nothing → the wizard can't
+   auto-fill the title (so you type one) and the bookmark it creates doesn't cleanly resolve.
+
+The honest nuance: RSSOwlnix is otherwise **well modernised** — it ships Apache **HttpClient 5** (SNI,
+TLS 1.3 all fine), and its *title extraction* and *parsing* steps are themselves content-driven, so on a
+clean fetch it can still degrade to reading the `<title>` directly. The brittleness is specifically the
+**"is this even a feed?" identification** step, which leans on metadata (Content-Type) and URL shape
+that the 2009 web reliably provided and today's CDN-fronted, extension-less endpoints often don't.
+
+**Why the Vaadin version doesn't care.** Our `FeedFetchService` never inspects the `Content-Type` and
+uses no URL-extension heuristic. It streams the response bytes straight into ROME:
+
+```java
+SyndFeed feed = input.build(new XmlReader(in));   // encoding + format sniffed from the bytes
+```
+
+`XmlReader` determines XML-ness and charset from the **content itself** (the `<?xml … encoding?>`
+declaration), not from HTTP headers. It asks *"can I parse these bytes as a feed?"* rather than *"did the
+server label this as a feed?"*.
+
+**The modernization point:** this is **header-/URL-driven identification vs content-driven parsing.**
+RSSOwl's approach was reasonable in 2009, when servers labelled feeds with `application/rss+xml` and feed
+URLs ended in `.xml`. The modern web — CDNs, dynamic routes, cautious/again-missing metadata, `nosniff`
+— erodes both assumptions. Parsing by content is the robust default now, and adopting it was free: it's
+just what the current library (ROME) does when you hand it the stream. A small, concrete example of "the
+rewrite inherits a decade of the ecosystem's hardening" rather than any cleverness on our part.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_
@@ -1169,6 +1237,16 @@ _(This section is the point of the experiment and grows as we go.)_
   (doc-sanctioned) styling approach were caught by the compiler and by *running and inspecting the
   app* — not by the model. The MCP server made the design current; the running app made the
   findings true.
+- **The rewrite inherits a decade of the ecosystem's hardening for free.** The clearest example
+  (Day 19): `https://vaadin.com/blog/feed` is served with **no `Content-Type`** and no feed file
+  extension, which defeats RSSOwl's 2009-era feed *identification* heuristics (Content-Type against
+  `FEED_MIME_TYPES`, `looksLikeFeedLink` URL-extension match, HTML `<link rel=alternate>` auto-
+  discovery). The Vaadin app subscribes without a hitch — not from any cleverness of ours, but because
+  the current library (ROME `XmlReader`) parses **by content**, sniffing XML/charset from the bytes
+  rather than trusting HTTP metadata. Header-/URL-driven identification → content-driven parsing is a
+  general modern-web robustness upgrade the migration got simply by using today's stack. (Fair caveat:
+  RSSOwlnix is itself well-modernised elsewhere — Apache HttpClient 5, content-driven title/parse — so
+  the failure is narrowly in the "is this even a feed?" step, not the whole pipeline.)
 
 ---
 
