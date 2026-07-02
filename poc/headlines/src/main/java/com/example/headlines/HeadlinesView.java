@@ -14,6 +14,8 @@ import com.example.headlines.Grouping.Bucket;
 import com.example.headlines.Grouping.GroupBy;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.UI;
+import com.vaadin.flow.component.avatar.Avatar;
+import com.vaadin.flow.component.avatar.AvatarVariant;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
@@ -861,17 +863,38 @@ public class HeadlinesView extends Div {
             else scheduleAutoMarkRead(selected.peek()); // re-arm; peek() = read signal outside an effect
         });
 
-        // Signed-in identity + logout (multi-user: proves whose data this is).
-        Span who = new Span("Signed in as " + displayName);
-        who.getStyle().set("align-self", "center").set("color", "var(--vaadin-text-color-secondary, #666)");
-        Button logout = new Button("Log out", e -> authContext.logout());
-        logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY);
+        // Signed-in identity + logout, grouped into a single pill on the right (multi-user: whose data this is).
+        Avatar avatar = new Avatar(displayName);
+        avatar.addThemeVariants(AvatarVariant.LUMO_XSMALL);
+        // Fallback values in each var() because this app runs the Aura theme, where the --lumo-* tokens
+        // are not defined (see styles.css notes).
+        Span who = new Span("Signed in as ");
+        who.getStyle().set("color", "var(--vaadin-text-color-secondary, #6b7280)")
+                .set("font-size", "var(--lumo-font-size-s, 0.875rem)");
+        Span whoName = new Span(displayName);
+        whoName.getStyle().set("font-weight", "600").set("font-size", "var(--lumo-font-size-s, 0.875rem)");
+        Span identity = new Span(who, whoName); // "Signed in as <name>" as one inline label
+        Button logout = new Button("Log out", VaadinIcon.SIGN_OUT.create(), e -> authContext.logout());
+        logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+
+        HorizontalLayout userGroup = new HorizontalLayout(avatar, identity, logout);
+        userGroup.setSpacing(false);
+        userGroup.setAlignItems(FlexComponent.Alignment.CENTER);
+        userGroup.getStyle()
+                .set("align-self", "center")
+                .set("gap", "0.5rem")
+                .set("padding", "0.2rem 0.35rem 0.2rem 0.7rem")
+                .set("background", "var(--lumo-contrast-5pct, rgba(0, 0, 0, 0.05))")
+                .set("border", "1px solid var(--vaadin-border-color, rgba(0, 0, 0, 0.1))")
+                .set("border-radius", "var(--lumo-border-radius-l, 999px)");
+
+        Div spacer = new Div(); // flexible gap that pins the user pill to the far right
 
         HorizontalLayout bar = new HorizontalLayout(groupBy, search, saveSearch, columnsMenu, filters,
-                unreadOnlyBox, autoRead, who, logout);
+                unreadOnlyBox, autoRead, spacer, userGroup);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
-        bar.setFlexGrow(1, who); // push logout to the right
+        bar.setFlexGrow(1, spacer); // spacer eats the slack, keeping the pill grouped on the right
         bar.getStyle().set("padding", "0.4rem 1rem");
         return bar;
     }
