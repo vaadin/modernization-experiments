@@ -18,7 +18,6 @@ import com.vaadin.flow.component.avatar.Avatar;
 import com.vaadin.flow.component.avatar.AvatarVariant;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
-import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.grid.Grid;
 import com.vaadin.flow.component.grid.GridSortOrder;
 import com.vaadin.flow.component.grid.GridVariant;
@@ -134,17 +133,6 @@ public class HeadlinesView extends Div {
     private boolean adjustingDateSort; // re-entrancy guard while swapping the date null policy
     private List<Grid.Column<Row>> columnOrder; // current left-to-right order, for persistence
 
-    // Auto-mark-read: RSSOwl marks the displayed article read after a short delay. A single shared
-    // daemon scheduler runs the delay off the UI thread; @Push (see Application) carries the update back.
-    private static final long AUTO_READ_DELAY_MS = 2000;
-    private static final java.util.concurrent.ScheduledExecutorService AUTO_READ_SCHEDULER =
-            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "auto-mark-read");
-                t.setDaemon(true);
-                return t;
-            });
-    private java.util.concurrent.ScheduledFuture<?> pendingAutoRead;
-    private boolean autoReadEnabled = false; // opt-in: browsing shouldn't silently de-bold unread items
     private boolean unreadOnly = false;      // RSSOwl's "Unread" view mode: show only unread items
 
     private final UserNewsService news;
@@ -244,7 +232,6 @@ public class HeadlinesView extends Div {
         });
         addDetachListener(e -> {
             if (broadcastReg != null) { broadcastReg.remove(); broadcastReg = null; }
-            if (pendingAutoRead != null) pendingAutoRead.cancel(false);
         });
     }
 
@@ -847,20 +834,19 @@ public class HeadlinesView extends Div {
                 e -> new FiltersDialog(news, subject, this::reloadUserData).open());
         filters.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
 
-        // "Unread only" view mode (RSSOwl's Unread tab).
-        Checkbox unreadOnlyBox = new Checkbox("Unread only");
-        unreadOnlyBox.setValue(unreadOnly);
-        unreadOnlyBox.getStyle().set("align-self", "center");
-        unreadOnlyBox.addValueChangeListener(e -> { unreadOnly = e.getValue(); applyGrouping(currentGroupBy); });
-
-        // Auto-mark-read toggle (RSSOwl marks the displayed article read after a short delay).
-        Checkbox autoRead = new Checkbox("Mark read after viewing");
-        autoRead.setValue(autoReadEnabled);
-        autoRead.getStyle().set("align-self", "center");
-        autoRead.addValueChangeListener(e -> {
-            autoReadEnabled = e.getValue();
-            if (!autoReadEnabled && pendingAutoRead != null) pendingAutoRead.cancel(false);
-            else scheduleAutoMarkRead(selected.peek()); // re-arm; peek() = read signal outside an effect
+        // "Unread only" view mode (RSSOwl's Unread tab). It's a VIEW control, so it belongs with
+        // Columns/Filters on the left — styled as a matching tertiary toggle button (icon + label, filled
+        // when active), NOT an identity-style pill. As a button it inherits the toolbar's END baseline,
+        // which also fixes the "floating too high" the centered checkbox had.
+        // (There used to be a "Mark read after viewing" dwell toggle here; it's gone — opening an article
+        // now marks it read immediately via markReadOnOpen(), so the delayed variant was redundant.)
+        Button unreadToggle = new Button("Unread only", VaadinIcon.ENVELOPE.create());
+        unreadToggle.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
+        styleViewToggle(unreadToggle, unreadOnly);
+        unreadToggle.addClickListener(e -> {
+            unreadOnly = !unreadOnly;
+            styleViewToggle(unreadToggle, unreadOnly);
+            applyGrouping(currentGroupBy);
         });
 
         // Signed-in identity + logout, grouped into a single pill on the right (multi-user: whose data this is).
@@ -893,7 +879,7 @@ public class HeadlinesView extends Div {
         Div spacer = new Div(); // flexible gap that pins the user pill to the far right
 
         HorizontalLayout bar = new HorizontalLayout(groupBy, search, saveSearch, columnsMenu, filters,
-                unreadOnlyBox, autoRead, spacer, userGroup);
+                unreadToggle, spacer, userGroup);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
         bar.setFlexGrow(1, spacer); // spacer eats the slack, keeping the pill grouped on the right
@@ -977,7 +963,6 @@ public class HeadlinesView extends Div {
             }
             if (opening) markReadOnOpen(ir.news()); // RSSOwl: opening an article marks it read (de-bold + count--)
             selected.set(ir.news());              // reader shows the clicked item (already read → "Mark unread")
-            scheduleAutoMarkRead(ir.news());       // (no-op once read; still honors the "after viewing" delay)
             headlines.getDataProvider().refreshAll(); // restyle selection highlight
         });
         headlines.addItemDoubleClickListener(e -> {
@@ -1334,8 +1319,7 @@ public class HeadlinesView extends Div {
     /**
      * RSSOwl marks an article read the moment you open it. Called on a plain click (which shows the
      * item in the reader): de-bolds the row and drops the feed/folder unread count by one. No-op if the
-     * item is already read. Distinct from the opt-in "Mark read after viewing" dwell timer
-     * ({@link #scheduleAutoMarkRead}), which handles marking read while browsing without opening.
+     * item is already read.
      */
     private void markReadOnOpen(NewsItem it) {
         if (it == null || !it.unread()) return;
@@ -1406,31 +1390,16 @@ public class HeadlinesView extends Div {
 
     // --- actions ---
 
-    /**
-     * Arm (or cancel) the auto-mark-read timer for the newly displayed headline. After
-     * {@link #AUTO_READ_DELAY_MS} the item is marked read — but only if it's still the selected item
-     * and still unread, so quickly skipping past articles doesn't mark them. The delay runs off the UI
-     * thread on a shared scheduler; the result is pushed back via {@code @Push} and {@code ui.access}.
-     */
-    private void scheduleAutoMarkRead(NewsItem shown) {
-        if (pendingAutoRead != null) {
-            pendingAutoRead.cancel(false);
-            pendingAutoRead = null;
-        }
-        if (!autoReadEnabled || shown == null || !shown.unread()) return;
-        UI ui = UI.getCurrent();
-        long id = shown.id();
-        pendingAutoRead = AUTO_READ_SCHEDULER.schedule(() -> ui.access(() -> {
-            // peek(), not get(): we're not inside a Signal.effect, so get() would throw
-            // "Signal.get() was called outside a reactive context" (Vaadin 25 Signals rule).
-            NewsItem cur = selected.peek();
-            if (cur != null && cur.id() == id && cur.unread()) {
-                cur.setRead(true);
-                news.setRead(subject, id, true); // persist per-user
-                headlines.getDataProvider().refreshItem(new Row.ItemRow(cur));
-                refreshTreeCounts(); // unread count dropped by one
-            }
-        }), AUTO_READ_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+    /** Style a toolbar toggle button to reflect its on/off state: a filled container surface + bold
+     *  label when active, plain tertiary (secondary text) when off. Uses base theme tokens so it adapts
+     *  across themes and color schemes. Sets {@code aria-pressed} for accessibility. */
+    private static void styleViewToggle(Button b, boolean on) {
+        b.getStyle()
+                .set("border-radius", "var(--vaadin-radius-m)")
+                .set("background", on ? "var(--vaadin-background-container-strong)" : "transparent")
+                .set("color", on ? "var(--vaadin-text-color)" : "var(--vaadin-text-color-secondary)")
+                .set("font-weight", on ? "var(--aura-font-weight-semibold, 600)" : "var(--aura-font-weight-regular, 400)");
+        b.getElement().setAttribute("aria-pressed", Boolean.toString(on));
     }
 
     private void openLink(NewsItem it) {
