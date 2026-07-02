@@ -866,13 +866,15 @@ public class HeadlinesView extends Div {
         // Signed-in identity + logout, grouped into a single pill on the right (multi-user: whose data this is).
         Avatar avatar = new Avatar(displayName);
         avatar.addThemeVariants(AvatarVariant.LUMO_XSMALL);
-        // Fallback values in each var() because this app runs the Aura theme, where the --lumo-* tokens
-        // are not defined (see styles.css notes).
+        // Theme tokens per the Vaadin MCP (Aura theme): base --vaadin-* properties work in every theme
+        // and are light/dark-adaptive; --aura-* is used only where base styles define no token
+        // (font size/weight), with a literal fallback.
         Span who = new Span("Signed in as ");
-        who.getStyle().set("color", "var(--vaadin-text-color-secondary, #6b7280)")
-                .set("font-size", "var(--lumo-font-size-s, 0.875rem)");
+        who.getStyle().set("color", "var(--vaadin-text-color-secondary)")
+                .set("font-size", "var(--aura-font-size-s, 0.8125rem)");
         Span whoName = new Span(displayName);
-        whoName.getStyle().set("font-weight", "600").set("font-size", "var(--lumo-font-size-s, 0.875rem)");
+        whoName.getStyle().set("font-weight", "var(--aura-font-weight-semibold, 600)")
+                .set("font-size", "var(--aura-font-size-s, 0.8125rem)");
         Span identity = new Span(who, whoName); // "Signed in as <name>" as one inline label
         Button logout = new Button("Log out", VaadinIcon.SIGN_OUT.create(), e -> authContext.logout());
         logout.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
@@ -882,11 +884,11 @@ public class HeadlinesView extends Div {
         userGroup.setAlignItems(FlexComponent.Alignment.CENTER);
         userGroup.getStyle()
                 .set("align-self", "center")
-                .set("gap", "0.5rem")
-                .set("padding", "0.2rem 0.35rem 0.2rem 0.7rem")
-                .set("background", "var(--lumo-contrast-5pct, rgba(0, 0, 0, 0.05))")
-                .set("border", "1px solid var(--vaadin-border-color, rgba(0, 0, 0, 0.1))")
-                .set("border-radius", "var(--lumo-border-radius-l, 999px)");
+                .set("gap", "var(--vaadin-gap-s)")
+                .set("padding", "var(--vaadin-padding-xs) var(--vaadin-padding-s)")
+                .set("background", "var(--vaadin-background-container)") // container surface; adapts to light/dark
+                .set("border", "1px solid var(--vaadin-border-color-secondary)")
+                .set("border-radius", "999px"); // full pill — base radius tokens are for rects, not pills
 
         Div spacer = new Div(); // flexible gap that pins the user pill to the far right
 
