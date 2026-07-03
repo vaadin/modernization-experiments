@@ -80,7 +80,7 @@ public class FeedFetchService {
     }
 
     private record Raw(String link, String title, String author, LocalDateTime date, boolean attachments,
-            String content) {}
+            String content, String categories) {}
 
     @PostConstruct
     void init() {
@@ -221,7 +221,7 @@ public class FeedFetchService {
                 out.add(new Raw(link, blankTo(e.getTitle(), "(untitled)").strip(),
                         e.getAuthor() == null ? "" : e.getAuthor().strip(), // leave blank when absent (RSSOwl-style)
                         toLocalDateTime(e.getPublishedDate() != null ? e.getPublishedDate() : e.getUpdatedDate()),
-                        att, extractContent(e)));
+                        att, extractContent(e), extractCategories(e)));
             }
         }
         out.sort(Comparator.comparing(Raw::date, Comparator.nullsLast(Comparator.reverseOrder())));
@@ -241,6 +241,18 @@ public class FeedFetchService {
         return e.getDescription() != null ? e.getDescription().getValue() : null;
     }
 
+    /** The article's own categories/tags (RSS/Atom {@code <category>}), comma-joined; "" when none.
+     *  This is RSSOwl's "Category" — the item's tags, distinct from the feed's folder/location. */
+    private static String extractCategories(SyndEntry e) {
+        if (e.getCategories() == null || e.getCategories().isEmpty()) return "";
+        return e.getCategories().stream()
+                .map(com.rometools.rome.feed.synd.SyndCategory::getName)
+                .filter(n -> n != null && !n.isBlank())
+                .map(String::strip)
+                .distinct()
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
     /** Persist new articles for the given owner (null = public/shared), de-duplicated by (feed, link, owner). */
     @Transactional
     int persist(Feed feed, String owner, List<Raw> raws) {
@@ -251,6 +263,7 @@ public class FeedFetchService {
                     : articles.findByFeedAndLinkAndOwner(feed, r.link(), owner).isPresent();
             if (!exists) {
                 Article a = new Article(feed, owner, r.link(), r.title(), r.author(), r.date(), r.attachments());
+                a.setCategories(r.categories());
                 a.setContent(r.content());
                 a.setContentText(com.example.headlines.ArticleHtml.toPlainText(r.content())); // for the FT index
                 articles.save(a);

@@ -47,6 +47,7 @@ class FeedFetchServiceTest {
     private HttpServer server;
     private String url;
     private volatile int itemCount;
+    private volatile boolean withCategories;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -66,11 +67,13 @@ class FeedFetchServiceTest {
         server.stop(0);
     }
 
-    private static String rss(int items) {
+    private String rss(int items) {
         StringBuilder sb = new StringBuilder("<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>T</title>");
         for (int i = 0; i < items; i++) {
             sb.append("<item><title>Item ").append(i).append("</title>")
-              .append("<link>https://example/").append(i).append("</link></item>");
+              .append("<link>https://example/").append(i).append("</link>");
+            if (withCategories) sb.append("<category>Tech</category><category>Business</category>");
+            sb.append("</item>");
         }
         return sb.append("</channel></rss>").toString();
     }
@@ -90,6 +93,16 @@ class FeedFetchServiceTest {
         svc.refreshPublic(url);
         svc.refreshPublic(url); // same links again
         assertEquals(5, articles.findByFeedAndOwnerIsNull(f).size(), "no duplicates on re-fetch");
+    }
+
+    @Test
+    void parsesRssCategoryTagsIntoArticleCategories() {
+        itemCount = 1;
+        withCategories = true;
+        Feed f = feeds.save(new Feed(url, "T", null));
+        svc.refreshPublic(url);
+        String cats = articles.findByFeedAndOwnerIsNull(f).get(0).getCategories();
+        assertEquals("Tech, Business", cats, "article's own <category> tags, comma-joined (RSSOwl Category)");
     }
 
     @Test

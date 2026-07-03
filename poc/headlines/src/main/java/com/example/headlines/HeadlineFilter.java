@@ -42,7 +42,8 @@ public final class HeadlineFilter {
         return switch (scope) {
             case TITLE -> contains(n.title(), termLower);
             case ENTIRE -> contains(n.title(), termLower) || contains(n.author(), termLower)
-                    || contains(n.category(), termLower) || contains(n.feed(), termLower)
+                    || contains(n.categories(), termLower) || contains(n.category(), termLower)
+                    || contains(n.feed(), termLower)
                     || contains(n.content(), termLower); // raw HTML content — cheap superstring match
         };
     }

@@ -170,6 +170,7 @@ public class UserNewsService {
                     a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, null,
                     a.getLink(), a.isAttachments());
             item.setContent(a.getContent());
+            item.setCategories(a.getCategories());
             item.setLabels(resolveLabels(st, userLabels));
             out.add(item);
         }
@@ -343,6 +344,7 @@ public class UserNewsService {
                         a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, null,
                         a.getLink(), a.isAttachments());
                 item.setContent(a.getContent());
+                item.setCategories(a.getCategories());
                 item.setLabels(resolveLabels(st, userLabels));
                 out.add(item);
             }
@@ -395,6 +397,7 @@ public class UserNewsService {
                     a.getPublishedDate(), read ? State.READ : State.UNREAD, sticky, null,
                     a.getLink(), a.isAttachments());
             item.setContent(a.getContent());
+            item.setCategories(a.getCategories());
             item.setLabels(resolveLabels(st, userLabels));
             out.add(item);
         }

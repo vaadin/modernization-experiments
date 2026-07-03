@@ -62,6 +62,12 @@ public class Article {
 
     private boolean attachments;
 
+    /** The article's own categories/tags as supplied by the feed (RSS/Atom {@code <category>}),
+     *  comma-joined for display. This is RSSOwl's "Category" column — the item's tags, NOT the feed's
+     *  folder (that is the "Location"). Often empty: many feeds carry no category elements. */
+    @Column(length = 1024)
+    private String categories;
+
     /** The article's HTML body/summary as supplied by the feed (RSS description / Atom content),
      *  shown in the reader pane. Sanitized at render time, not here. Nullable; can be large -> CLOB. */
     @Lob
@@ -93,6 +99,8 @@ public class Article {
     public String getAuthor() { return author; }
     public LocalDateTime getPublishedDate() { return publishedDate; }
     public boolean isAttachments() { return attachments; }
+    public String getCategories() { return categories; }
+    public void setCategories(String categories) { this.categories = categories; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
     public String getContentText() { return contentText; }

@@ -131,6 +131,9 @@ public class HeadlinesView extends Div {
     private final ValueSignal<NewsItem> selected = new ValueSignal<NewsItem>((NewsItem) null);
     private final Map<Row.GroupRow, List<Row>> children = new HashMap<>();
     private Grid.Column<Row> dateColumn;
+    private Grid.Column<Row> feedColumn;      // auto-shown for aggregate selections (RSSOwl synthetic rule)
+    private boolean userFeedColumn;           // user forced the Feed column on via the Columns menu
+    private boolean aggregateSelection = true; // current selection spans >1 feed (folder/saved/bin/all)
     private boolean adjustingDateSort; // re-entrancy guard while swapping the date null policy
     private List<Grid.Column<Row>> columnOrder; // current left-to-right order, for persistence
 
@@ -200,6 +203,7 @@ public class HeadlinesView extends Div {
         configureFeedTree();
         configureHeadlines();
         applyColumnPrefs(); // restore this user's saved column order/width/visibility
+        updateFeedColumnVisibility(); // initial view spans all feeds -> show Feed (RSSOwl synthetic rule)
         applyGrouping(GroupBy.NONE);
         applySortPrefs();   // restore this user's saved multi-sort (or default Date DESC)
 
@@ -327,6 +331,10 @@ public class HeadlinesView extends Div {
             } else {
                 currentItems = allItems;
             }
+            // A single feed needs no Feed column; anything spanning multiple feeds (folder / saved search /
+            // bin / the whole archive) auto-shows it, like RSSOwl.
+            aggregateSelection = !(sel instanceof FeedNode.Feed);
+            updateFeedColumnVisibility();
             applyGrouping(currentGroupBy);
         });
 
@@ -873,12 +881,13 @@ public class HeadlinesView extends Div {
         MenuBar columnsMenu = new MenuBar();
         columnsMenu.addThemeVariants(MenuBarVariant.LUMO_TERTIARY, MenuBarVariant.LUMO_SMALL);
         SubMenu cols = columnsMenu.addItem("Columns").getSubMenu();
+        addColumnToggle(cols, "feed", "Feed");
         addColumnToggle(cols, "date", "Date");
         addColumnToggle(cols, "author", "Author");
         addColumnToggle(cols, "category", "Category");
-        addColumnToggle(cols, "feed", "Feed");
-        addColumnToggle(cols, "status", "Status");
         addColumnToggle(cols, "sticky", "Sticky");
+        addColumnToggle(cols, "status", "Status");
+        addColumnToggle(cols, "location", "Location");
 
         // News filters (RSSOwl's rules engine: match conditions → actions).
         Button filters = new Button("Filters", VaadinIcon.FILTER.create(),
@@ -961,16 +970,30 @@ public class HeadlinesView extends Div {
         return bar;
     }
 
-    /** A checkable "show this column" item that toggles visibility and persists the layout. */
+    /** A checkable "show this column" item that toggles visibility and persists the layout. The Feed
+     *  column is special: it is also auto-shown for aggregate selections (RSSOwl's synthetic rule), so its
+     *  toggle drives the {@code userFeedColumn} override rather than the visibility directly. */
     private void addColumnToggle(SubMenu menu, String key, String label) {
         Grid.Column<Row> col = headlines.getColumnByKey(key);
+        boolean isFeed = "feed".equals(key);
         MenuItem item = menu.addItem(label, e -> {
-            col.setVisible(e.getSource().isChecked());
+            if (isFeed) {
+                userFeedColumn = e.getSource().isChecked();
+                updateFeedColumnVisibility();
+            } else {
+                col.setVisible(e.getSource().isChecked());
+            }
             persistColumnLayout();
         });
         item.setCheckable(true);
-        item.setChecked(col.isVisible()); // reflects any state already restored by applyColumnPrefs()
+        item.setChecked(isFeed ? userFeedColumn : col.isVisible());
         item.setKeepOpen(true);           // let the user toggle several without reopening the menu
+    }
+
+    /** Show the Feed column when the user forced it on, or when the current selection spans multiple feeds
+     *  (a folder, saved search, bin, or the whole archive) — matching RSSOwl's synthetic Feed column. */
+    private void updateFeedColumnVisibility() {
+        if (feedColumn != null) feedColumn.setVisible(userFeedColumn || aggregateSelection);
     }
 
     // --- top-right pane: headlines ---
@@ -982,13 +1005,28 @@ public class HeadlinesView extends Div {
         // ranges — NO checkbox column (Vaadin's MULTI mode forces one, so we drive selection ourselves).
         headlines.setSelectionMode(TreeGrid.SelectionMode.NONE);
 
-        // Columns match the original's News table: Title · Date · Author · Category. The read/unread
-        // state is an icon inside the Title cell (as in RSSOwl), not a separate column; there are no
-        // inline read/sticky toggle columns (those actions live in the context menu + reader footer).
+        // Columns mirror RSSOwl's News table (NewsColumn.java). Default visible set + sort match RSSOwl's
+        // defaults exactly: Title · Date · Author · Category · Sticky, sorted Date descending
+        // (PreferencesInitializer.initNewsColumnsDefaults). The read/unread state is an icon inside the
+        // Title cell (as in RSSOwl), not a separate column. Column ORDER here puts Feed right after Title so
+        // that, when it is auto-shown for an aggregate selection (folder/saved search/bin — see
+        // updateFeedColumnVisibility), it lands where RSSOwl synthetically inserts it (index 1).
+        // Fixed column widths (flexGrow 0) throughout, so that when the user turns on extra columns the
+        // total width exceeds the pane and the grid gets a HORIZONTAL SCROLLBAR — rather than every column
+        // flex-shrinking to nothing (which is what hid Status/Location on narrow screens). This also
+        // matches RSSOwl's SWT table, whose columns are fixed-width and scroll.
         headlines.addComponentHierarchyColumn(this::titleComponent)
-                .setHeader("Title").setKey("title").setFlexGrow(3).setResizable(true)
+                .setHeader("Title").setKey("title").setWidth("320px").setFlexGrow(0).setResizable(true)
                 .setComparator(rowCmp(Comparator.comparing(NewsItem::title, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
+
+        // Feed name (RSSOwl NewsColumn.FEED). Hidden for a single-feed selection; auto-shown when the
+        // selection spans multiple feeds so you can tell sources apart. Text (we have no favicons).
+        feedColumn = headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().feed() : "")
+                .setHeader("Feed").setKey("feed").setWidth("160px").setFlexGrow(0).setResizable(true)
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::feed, String.CASE_INSENSITIVE_ORDER)))
+                .setSortable(true);
+        feedColumn.setVisible(false);
 
         dateColumn = headlines.addColumn(row -> {
                     if (row instanceof Row.ItemRow ir && ir.news().date() != null) {
@@ -1001,32 +1039,38 @@ public class HeadlinesView extends Div {
         applyDateNullPolicy(true); // default view is date DESC — keep undated rows last, not first
 
         headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().author() : "")
-                .setHeader("Author").setKey("author").setFlexGrow(1).setResizable(true)
+                .setHeader("Author").setKey("author").setWidth("150px").setFlexGrow(0).setResizable(true)
                 .setComparator(rowCmp(Comparator.comparing(NewsItem::author, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
-        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().category() : "")
-                .setHeader("Category").setKey("category").setFlexGrow(1).setResizable(true)
-                .setComparator(rowCmp(Comparator.comparing(NewsItem::category, String.CASE_INSENSITIVE_ORDER)))
+        // Category = the article's own RSS/Atom <category> tags (RSSOwl NewsColumn.CATEGORY), NOT the
+        // folder. Often empty. The folder path lives in the Location column below.
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().categories() : "")
+                .setHeader("Category").setKey("category").setWidth("160px").setFlexGrow(0).setResizable(true)
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::categories, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
-        // Additional RSSOwl columns — the remaining "group by" dimensions as sortable columns. Hidden by
-        // default (toggle on via the Columns menu); sorting them clusters items by that dimension.
-        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().feed() : "")
-                .setHeader("Feed").setKey("feed").setFlexGrow(1).setResizable(true)
-                .setComparator(rowCmp(Comparator.comparing(NewsItem::feed, String.CASE_INSENSITIVE_ORDER)))
-                .setSortable(true).setVisible(false);
+        // Sticky (RSSOwl NewsColumn.STICKY): an icon-only column — no header text, a faint ★ header with a
+        // "Sticky" tooltip, and a gold ★ in rows that are sticky. Visible by default.
+        Span stickyHeader = new Span("★");
+        stickyHeader.getElement().setAttribute("title", "Sticky");
+        stickyHeader.getStyle().set("opacity", "0.4");
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir && ir.news().sticky() ? "★" : "")
+                .setHeader(stickyHeader).setKey("sticky").setWidth("56px").setFlexGrow(0).setResizable(false)
+                .setComparator(rowCmp(Comparator.comparing(n -> !n.sticky()))) // sticky first when ascending
+                .setSortable(true);
 
+        // Status (RSSOwl NewsColumn.STATUS): New/Updated/Unread/Read. Hidden by default.
         headlines.addColumn(row -> row instanceof Row.ItemRow ir ? statusLabel(ir.news().state()) : "")
                 .setHeader("Status").setKey("status").setWidth("110px").setFlexGrow(0).setResizable(true)
-                // Sort by state order (New/Updated/Unread/Read) — unread-ish first.
                 .setComparator(rowCmp(Comparator.comparingInt(n -> n.state().ordinal())))
                 .setSortable(true).setVisible(false);
 
-        headlines.addColumn(row -> row instanceof Row.ItemRow ir && ir.news().sticky() ? "★" : "")
-                .setHeader("Sticky").setKey("sticky").setWidth("90px").setFlexGrow(0).setResizable(true)
-                // Sticky rows first when ascending.
-                .setComparator(rowCmp(Comparator.comparing(n -> !n.sticky())))
+        // Location (RSSOwl NewsColumn.LOCATION): the feed's folder path + feed, e.g. "Business/Fast
+        // Company". Hidden by default. This is what our old, mislabeled "Category" column really showed.
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().location() : "")
+                .setHeader("Location").setKey("location").setWidth("220px").setFlexGrow(0).setResizable(true)
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::location, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true).setVisible(false);
 
         headlines.setPartNameGenerator(row -> {
@@ -1159,6 +1203,11 @@ public class HeadlinesView extends Div {
     }
 
     /** Snapshot the current column order/width/visibility and persist it for this user. */
+    /** Bump when the default column set/meaning changes so saved layouts from older versions are reset to
+     *  the new defaults exactly once. v2 = the RSSOwl column-parity change (Category=tags, +Location,
+     *  Sticky default-on, Feed auto). Persisted as a synthetic, non-column pref row. */
+    private static final String COLUMN_PREF_VERSION = "__colver:2";
+
     private void persistColumnLayout() {
         List<UserNewsService.ColumnState> states = new ArrayList<>();
         int pos = 0;
@@ -1166,13 +1215,22 @@ public class HeadlinesView extends Div {
             if (c.getKey() == null) continue;
             states.add(new UserNewsService.ColumnState(c.getKey(), pos++, c.getWidth(), c.isVisible()));
         }
+        // Version stamp (not a real column) so a future default change can invalidate this layout.
+        states.add(new UserNewsService.ColumnState(COLUMN_PREF_VERSION, pos, null, true));
         news.saveColumnLayout(subject, states);
     }
 
     /** Restore this user's saved column order/width/visibility (no-op on first use). */
     private void applyColumnPrefs() {
         List<UserNewsService.ColumnState> prefs = news.columnPrefs(subject);
-        if (prefs.isEmpty()) return;
+        // A layout saved under an older default set (or none) is reset to the current RSSOwl defaults and
+        // re-persisted with the current version stamp — so pre-parity users don't keep the old set/order.
+        boolean stale = prefs.stream().noneMatch(cs -> COLUMN_PREF_VERSION.equals(cs.key()));
+        if (stale) {
+            columnOrder = new ArrayList<>(headlines.getColumns());
+            if (!prefs.isEmpty()) persistColumnLayout();
+            return;
+        }
 
         // Width + visibility per column.
         for (UserNewsService.ColumnState cs : prefs) {
@@ -1182,7 +1240,8 @@ public class HeadlinesView extends Div {
                 c.setWidth(cs.width());
                 c.setFlexGrow(0); // a saved (resized) width is fixed, like RSSOwl
             }
-            c.setVisible(cs.visible());
+            // Feed visibility is auto-managed (aggregate selection) — don't let a stale saved value force it.
+            if (c != feedColumn) c.setVisible(cs.visible());
         }
 
         // Order: saved columns first (in saved order), then any newer columns not yet saved.

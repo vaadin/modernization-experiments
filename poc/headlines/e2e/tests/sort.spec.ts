@@ -1,12 +1,12 @@
 import { test, expect, Page } from '@playwright/test';
 
 /**
- * E2E: Vaadin multi-priority sort on the headline grid, persisted per user. (The extra Feed/Status/Sticky
- * columns and the persistence layer are covered by JUnit; here we exercise the real multi-column sort +
- * its round-trip through reload.)
+ * E2E: Vaadin multi-priority sort on the headline grid, persisted per user. (The extra columns and the
+ * persistence layer are covered by JUnit; here we exercise the real multi-column sort + its round-trip
+ * through reload.)
  *
- * Note: the sort is persisted per user server-side, so this test normalizes alice's sort on entry and
- * resets it to the Date-only default on exit — otherwise the leftover sort would bleed into other specs.
+ * The sort is persisted per user server-side, so this test fully normalizes alice's sort to the Date-only
+ * default on entry (clearing any leftover from other specs / manual use) and again on exit.
  */
 
 // Click a headline-grid column header's sorter to (multi-)sort by it. The sorter wrapper has no size of
@@ -15,17 +15,22 @@ const sortByColumn = (page: Page, label: string) =>
   page.locator('vaadin-grid').nth(1).locator('vaadin-grid-sorter')
     .filter({ hasText: label }).first().click({ force: true });
 
-/** Labels of the currently active sorters (columns that are part of the sort). */
+/** Labels of the currently active sorters (columns that are part of the sort). [] if grid not ready. */
 const activeSortCols = (page: Page) =>
-  page.evaluate(() =>
-    [...document.querySelectorAll('vaadin-grid')[1].querySelectorAll('vaadin-grid-sorter')]
+  page.evaluate(() => {
+    const g = document.querySelectorAll('vaadin-grid')[1];
+    if (!g) return [];
+    return [...g.querySelectorAll('vaadin-grid-sorter')]
       .filter((s: any) => s.direction)
-      .map((s: any) => (s.textContent || '').trim()));
+      .map((s: any) => (s.textContent || '').trim());
+  });
 
 /** Current sort direction of a given column ('asc' | 'desc' | null). */
 const sortDir = (page: Page, label: string) =>
   page.evaluate((lbl) => {
-    const s: any = [...document.querySelectorAll('vaadin-grid')[1].querySelectorAll('vaadin-grid-sorter')]
+    const g = document.querySelectorAll('vaadin-grid')[1];
+    if (!g) return null;
+    const s: any = [...g.querySelectorAll('vaadin-grid-sorter')]
       .find((x: any) => (x.textContent || '').trim() === lbl);
     return s ? s.direction || null : null;
   }, label);
@@ -40,18 +45,26 @@ async function setSort(page: Page, label: string, want: 'asc' | 'desc' | null) {
   expect(await sortDir(page, label)).toBe(want);
 }
 
+/** Reset to the Date-only default: clear every text-headed sorter except Date. */
+async function resetToDateOnly(page: Page) {
+  for (const label of ['Title', 'Feed', 'Author', 'Category', 'Status', 'Location']) {
+    await setSort(page, label, null);
+  }
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('input[placeholder^="Filter"]')).toBeVisible();
-  await setSort(page, 'Author', null); // normalize: no Author sort to start from a known baseline
+  await expect.poll(async () => (await activeSortCols(page)).length).toBeGreaterThan(0); // grid ready
+  await resetToDateOnly(page);
 });
 
 test.afterEach(async ({ page }) => {
-  await setSort(page, 'Author', null); // clean up so the persisted sort doesn't leak into other specs
+  await resetToDateOnly(page); // don't leak a sort into other specs
 });
 
 test('Multi-priority sort persists per user across reload', async ({ page }) => {
-  // Baseline: Date (desc) is the default primary sort; Author is not sorted.
+  // Baseline: Date (desc) is the default primary sort; nothing else is sorted.
   await expect.poll(async () => activeSortCols(page)).toEqual(['Date']);
 
   // Add Author as a second sort column (multi-sort append).

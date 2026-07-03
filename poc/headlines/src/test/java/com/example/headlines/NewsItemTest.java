@@ -79,6 +79,26 @@ class NewsItemTest {
     }
 
     @Test
+    void categoriesDefaultsToEmptyAndReflectsRealTags() {
+        NewsItem n = withState(State.UNREAD); // no categories set
+        assertEquals("", n.categories(), "no <category> tags -> empty, never null");
+        n.setCategories("Tech, Business");
+        assertEquals("Tech, Business", n.categories(), "real RSS category tags, distinct from the folder");
+    }
+
+    @Test
+    void locationIsFolderSlashFeed_orJustFeedAtRoot() {
+        // 4th ctor arg is the folder (category), 5th is the feed.
+        NewsItem inFolder = new NewsItem(1, "T", "A", "Business", "Fast Company",
+                LocalDateTime.now(), State.UNREAD, false, null, "https://x/1", false);
+        assertEquals("Business/Fast Company", inFolder.location());
+
+        NewsItem atRoot = new NewsItem(2, "T", "A", "", "Loose Feed",
+                LocalDateTime.now(), State.UNREAD, false, null, "https://x/2", false);
+        assertEquals("Loose Feed", atRoot.location(), "no folder -> just the feed name");
+    }
+
+    @Test
     void identityIsByIdSoStateChangesPreserveEquality() {
         NewsItem a = new NewsItem(7, "T", "A", "C", "F", null, State.UNREAD, false, null, "https://x", false);
         NewsItem sameId = new NewsItem(7, "different", "z", "z", "z", null, State.READ, true, "#fff", "https://y", true);

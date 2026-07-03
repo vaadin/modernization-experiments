@@ -34,8 +34,9 @@ public class NewsItem {
     private final long id;
     private final String title;
     private final String author;
-    private final String category; // RSSOwl: feed's folder (e.g. "News"); drives Group-by-Category
+    private final String category; // feed's FOLDER path (e.g. "News"); drives folder aggregation + Group-by
     private final String feed;     // source feed title (e.g. "BBC News"); drives Group-by-Feed
+    private String categories;     // RSSOwl "Category": item's own tags (<category>); set after construction
     private final LocalDateTime date; // may be null -> sorts last, like RSSOwl
     private State state;
     private boolean sticky;
@@ -71,8 +72,19 @@ public class NewsItem {
     public long id() { return id; }
     public String title() { return title; }
     public String author() { return author; }
+    /** The feed's folder path (e.g. "Business" / "Computers/Windows"); "" for a loose feed. Drives the
+     *  tree's folder aggregation and Group-by. This is NOT RSSOwl's "Category" column — see
+     *  {@link #categories()} for that and {@link #location()} for the folder/feed shown to the user. */
     public String category() { return category; }
     public String feed() { return feed; }
+    /** RSSOwl's "Category" column: the item's own tags (RSS/Atom {@code <category>}), comma-joined; "" when
+     *  none (many feeds carry none). Distinct from the folder ({@link #category()}). */
+    public String categories() { return categories == null ? "" : categories; }
+    /** RSSOwl's "Location" column: where the item lives — its folder path plus feed, e.g.
+     *  "Business/Fast Company"; just the feed when the feed sits at the root. */
+    public String location() {
+        return (category == null || category.isBlank()) ? feed : category + "/" + feed;
+    }
     public LocalDateTime date() { return date; }
     public State state() { return state; }
     public boolean sticky() { return sticky; }
@@ -85,6 +97,7 @@ public class NewsItem {
     public boolean attachments() { return attachments; }
     public String content() { return content; }
     public void setContent(String content) { this.content = content; }
+    public void setCategories(String categories) { this.categories = categories; }
 
     /** Bold in RSSOwl when NEW, UPDATED or UNREAD (see {@code NewsTableLabelProvider.getFont}). */
     public boolean unread() {
