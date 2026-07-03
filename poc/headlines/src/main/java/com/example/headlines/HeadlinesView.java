@@ -1039,9 +1039,10 @@ public class HeadlinesView extends Div {
         });
 
         // Enter on the focused headline: unread -> read now; read -> mark unread (a deliberate toggle).
-        // (TreeGrid isn't a KeyNotifier, so listen at the DOM level, filtered to the Enter key.)
-        headlines.getElement().addEventListener("keydown", e -> onEnterKey())
-                .setFilter("event.key === 'Enter'");
+        // Use Vaadin Shortcuts scoped to the grid (robust across focus/shadow-DOM, and only fires while
+        // the headline grid has focus — so Enter in the search box or dialogs is unaffected).
+        com.vaadin.flow.component.Shortcuts.addShortcutListener(this, this::onEnterKey,
+                com.vaadin.flow.component.Key.ENTER).listenOn(headlines);
 
         // Column customisation (RSSOwl persists per-column order/width/visibility): let the user
         // drag column headers to reorder and drag header edges to resize; persist either change.
@@ -1417,10 +1418,9 @@ public class HeadlinesView extends Div {
         NewsItem item = displayedItems().stream().filter(n -> n.id() == id).findFirst().orElse(null);
         if (item == null) return;
         selectedIds.clear(); selectedIds.add(id); selectionAnchorId = id;
-        selected.set(item);                 // show in reader
-        boolean nowRead = item.unread();    // unread → read now; read → mark unread
-        item.setRead(nowRead);
-        news.setRead(subject, id, nowRead); // persist per-user
+        selected.set(item);                          // show in reader
+        boolean nowRead = news.toggleRead(subject, id); // flip + persist; returns the new state
+        item.setRead(nowRead);                       // keep the in-memory item in sync
         headlines.getDataProvider().refreshItem(new Row.ItemRow(item));
         refreshTreeCounts();
         headlines.getDataProvider().refreshAll();

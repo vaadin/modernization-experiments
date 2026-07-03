@@ -104,6 +104,39 @@ class UserNewsServiceTest {
     }
 
     @Test
+    void toggleReadFlipsStatePersistsAndIsPerUser() {
+        Feed f = feeds.save(new Feed("https://feed", "F", null));
+        Article a = articles.save(new Article(f, null, "https://x/1", "Item", "a", LocalDateTime.now(), false));
+        subscriptions.save(new Subscription(ALICE, f, null, 0));
+        subscriptions.save(new Subscription(BOB, f, null, 0));
+
+        // Backs the keyboard Enter action. Starts unread → first toggle marks it read.
+        assertTrue(svc.toggleRead(ALICE, a.getId()), "unread → read returns the new state (read)");
+        assertFalse(svc.newsItems(ALICE).get(0).unread(), "alice's item is now read (persisted)");
+        assertTrue(svc.newsItems(BOB).get(0).unread(), "bob is unaffected (per-user isolation)");
+
+        // Toggling again marks it unread.
+        assertFalse(svc.toggleRead(ALICE, a.getId()), "read → unread returns the new state (unread)");
+        assertTrue(svc.newsItems(ALICE).get(0).unread(), "alice's item is unread again");
+    }
+
+    @Test
+    void readDelayMsDefaultsAndPersistsPerUserIncludingSentinels() {
+        assertEquals(UserNewsService.DEFAULT_READ_DELAY_MS, svc.readDelayMs(ALICE),
+                "auto-read delay defaults to 0.5s when the user hasn't chosen one");
+
+        svc.setReadDelayMs(ALICE, 2000);
+        assertEquals(2000, svc.readDelayMs(ALICE), "alice's chosen delay persists");
+        assertEquals(UserNewsService.DEFAULT_READ_DELAY_MS, svc.readDelayMs(BOB),
+                "bob keeps the default (per-user)");
+
+        svc.setReadDelayMs(ALICE, -1); // Off
+        assertEquals(-1, svc.readDelayMs(ALICE), "off (-1) round-trips");
+        svc.setReadDelayMs(ALICE, 0);  // Instant
+        assertEquals(0, svc.readDelayMs(ALICE), "instant (0) round-trips");
+    }
+
+    @Test
     void labelsArePerUserAndExposedOnNewsItem() {
         Feed f = feeds.save(new Feed("https://feed", "F", null));
         Article a = articles.save(new Article(f, null, "https://x/1", "Item", "a", LocalDateTime.now(), false));

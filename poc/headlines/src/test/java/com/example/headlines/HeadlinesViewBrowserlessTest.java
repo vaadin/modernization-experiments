@@ -71,9 +71,12 @@ class HeadlinesViewBrowserlessTest extends BrowserlessTest {
         // feeds tree + headlines tree
         assertEquals(2, $(TreeGrid.class).all().size(), "feeds tree + headlines grid");
 
-        // signed-in identity in the header
-        boolean signedInShown = $(Span.class).all().stream()
-                .anyMatch(s -> "Signed in as alice".equals(s.getText()));
+        // signed-in identity in the header. The identity pill renders it as two spans — a
+        // "Signed in as " label plus the bold user name — so assert both parts are present.
+        var spanTexts = $(Span.class).all().stream().map(Span::getText)
+                .filter(java.util.Objects::nonNull).toList();
+        boolean signedInShown = spanTexts.stream().anyMatch(t -> t.startsWith("Signed in as"))
+                && spanTexts.contains("alice");
         assertTrue(signedInShown, "header shows the authenticated user");
 
         // the RSSOwl-style actions are present

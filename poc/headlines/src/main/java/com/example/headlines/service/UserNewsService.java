@@ -472,6 +472,20 @@ public class UserNewsService {
         upsert(subject, articleId, st -> st.setRead(read));
     }
 
+    /** Flip the read/unread state of one article for the user and return the new state. Backs the
+     *  keyboard Enter action (unread → read now; read → mark unread). A never-seen article counts as
+     *  unread, so the first toggle marks it read. */
+    @Transactional
+    public boolean toggleRead(String subject, long articleId) {
+        Article a = articles.findById(articleId).orElseThrow();
+        ArticleState st = states.findByOwnerAndArticle(subject, a)
+                .orElseGet(() -> new ArticleState(subject, a));
+        boolean nowRead = !st.isRead();
+        st.setRead(nowRead);
+        states.save(st);
+        return nowRead;
+    }
+
     /** Mark many articles read/unread in one transaction (RSSOwl's "Mark all read"). */
     @Transactional
     public void setReadBulk(String subject, java.util.Collection<Long> articleIds, boolean read) {
