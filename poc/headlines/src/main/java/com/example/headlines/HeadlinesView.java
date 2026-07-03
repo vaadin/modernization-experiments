@@ -329,6 +329,22 @@ public class HeadlinesView extends Div {
             applyGrouping(currentGroupBy);
         });
 
+        // Make a folder's NAME select it (show its cumulative article list), not just expand.
+        // The name is rendered inside the vaadin-grid-tree-toggle, which consumes the click for
+        // expand/collapse and stops it propagating — so addItemClickListener does NOT fire on a name
+        // click (only on the empty row area). We therefore also select on expand/collapse: a client-driven
+        // folder-name click toggles the folder AND selects it (→ cumulative list). item-click still covers
+        // clicks on the empty row area and on leaf rows.
+        feedTree.addItemClickListener(e -> {
+            if (e.getItem() != null) feedTree.select(e.getItem());
+        });
+        feedTree.addExpandListener(e -> {
+            if (e.isFromClient()) e.getItems().forEach(feedTree::select);
+        });
+        feedTree.addCollapseListener(e -> {
+            if (e.isFromClient()) e.getItems().forEach(feedTree::select);
+        });
+
         // Right-click a channel: set credentials / unsubscribe; right-click a saved search: delete it.
         GridContextMenu<FeedNode> feedMenu = feedTree.addContextMenu();
         GridMenuItem<FeedNode> credItem = feedMenu.addItem("Set credentials…", e -> e.getItem()
