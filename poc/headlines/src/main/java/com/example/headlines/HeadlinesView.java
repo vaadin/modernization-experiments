@@ -135,6 +135,19 @@ public class HeadlinesView extends Div {
 
     private boolean unreadOnly = false;      // RSSOwl's "Unread" view mode: show only unread items
 
+    // Keyboard navigation: the grid moves a focused cell natively; we react to cell-focus to drive the
+    // reader + a delayed mark-read (RSSOwl's model — show at once, mark read after a dwell).
+    private static final java.util.concurrent.ScheduledExecutorService DWELL_SCHEDULER =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "headline-dwell");
+                t.setDaemon(true);
+                return t;
+            });
+    private java.util.concurrent.ScheduledFuture<?> pendingDwell;
+    private Long focusedId;               // id of the keyboard-focused headline (for the dwell + Enter)
+    private int readDelayMs;              // -1 off, 0 instant, else the auto-read dwell (loaded from pref)
+    private boolean pointerFocus;         // true during a mouse interaction, so cell-focus defers to the click handler
+
     private final UserNewsService news;
     private final FeedFetchService feedFetch;
     private final com.example.headlines.service.FeedBroadcaster broadcaster;
@@ -166,6 +179,7 @@ public class HeadlinesView extends Div {
         setSizeFull();
         this.allItems = news.newsItems(subject);
         this.currentItems = allItems;
+        this.readDelayMs = news.readDelayMs(subject); // keyboard auto-read delay (per-user)
 
         // "New since last visit" notification (RSSOwl pops one when a refresh brings in new news).
         // Read last-seen before updating it; show the count once the view attaches.
@@ -232,6 +246,7 @@ public class HeadlinesView extends Div {
         });
         addDetachListener(e -> {
             if (broadcastReg != null) { broadcastReg.remove(); broadcastReg = null; }
+            cancelDwell();
         });
     }
 
@@ -849,6 +864,29 @@ public class HeadlinesView extends Div {
             applyGrouping(currentGroupBy);
         });
 
+        // Auto-read delay for keyboard navigation (RSSOwl's MARK_READ_STATE + MARK_READ_IN_MILLIS, but a
+        // single global per-user setting — deliberately not per-feed). Persisted per user.
+        Select<Integer> autoRead = new Select<>();
+        autoRead.setLabel("Auto-read");
+        autoRead.setItems(-1, 0, 500, 1000, 2000, 5000);
+        autoRead.setItemLabelGenerator(ms -> switch (ms) {
+            case -1 -> "Off";
+            case 0 -> "Instant";
+            case 500 -> "0.5s";
+            case 1000 -> "1s";
+            case 2000 -> "2s";
+            case 5000 -> "5s";
+            default -> ms + "ms";
+        });
+        autoRead.setValue(readDelayMs);
+        autoRead.setWidth("6.5em");
+        autoRead.getElement().setAttribute("title", "When keyboard-navigating, mark the focused article read after this delay");
+        autoRead.addValueChangeListener(e -> {
+            readDelayMs = e.getValue();
+            news.setReadDelayMs(subject, readDelayMs);
+            cancelDwell();
+        });
+
         // Signed-in identity + logout, grouped into a single pill on the right (multi-user: whose data this is).
         Avatar avatar = new Avatar(displayName);
         avatar.addThemeVariants(AvatarVariant.LUMO_XSMALL);
@@ -879,7 +917,7 @@ public class HeadlinesView extends Div {
         Div spacer = new Div(); // flexible gap that pins the user pill to the far right
 
         HorizontalLayout bar = new HorizontalLayout(groupBy, search, saveSearch, columnsMenu, filters,
-                unreadToggle, spacer, userGroup);
+                unreadToggle, autoRead, spacer, userGroup);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
         bar.setFlexGrow(1, spacer); // spacer eats the slack, keeping the pill grouped on the right
@@ -946,8 +984,15 @@ public class HeadlinesView extends Div {
             return sb.toString();
         });
 
+        // A mouse interaction owns selection via the click handler below; the flag lets the cell-focus
+        // listener tell mouse-driven focus (skip) from keyboard-driven focus (handle). Sequence is
+        // mousedown -> focus -> mouseup, so the flag is set before cell-focus fires during a click.
+        headlines.getElement().addEventListener("mousedown", e -> pointerFocus = true);
+        headlines.getElement().addEventListener("mouseup", e -> pointerFocus = false);
+
         // Desktop-style click selection: plain = select one + open; Cmd/Ctrl = toggle; Shift = range.
         headlines.addItemClickListener(e -> {
+            cancelDwell(); // a click cancels any pending keyboard auto-read
             if (!(e.getItem() instanceof Row.ItemRow ir)) return;
             long id = ir.news().id();
             boolean opening = false;
@@ -961,6 +1006,7 @@ public class HeadlinesView extends Div {
                 selectedIds.clear(); selectedIds.add(id); selectionAnchorId = id;
                 opening = true;                   // a plain click OPENS the article in the reader
             }
+            focusedId = id;                       // keep keyboard focus in sync with the click
             if (opening) markReadOnOpen(ir.news()); // RSSOwl: opening an article marks it read (de-bold + count--)
             selected.set(ir.news());              // reader shows the clicked item (already read → "Mark unread")
             headlines.getDataProvider().refreshAll(); // restyle selection highlight
@@ -968,6 +1014,34 @@ public class HeadlinesView extends Div {
         headlines.addItemDoubleClickListener(e -> {
             if (e.getItem() instanceof Row.ItemRow ir) openLink(ir.news());
         });
+
+        // Keyboard navigation. The grid moves a focused cell natively on Arrow/Home/End/PageUp/Down; we
+        // react to it (keyboard only — mouse is handled above). RSSOwl's model: show the focused article
+        // in the reader at once, and mark it read after the auto-read delay.
+        headlines.addCellFocusListener(e -> {
+            if (pointerFocus) return; // mouse focus — the click handler owns it
+            cancelDwell();
+            if (!(e.getItem().orElse(null) instanceof Row.ItemRow ir)) { focusedId = null; return; }
+            NewsItem item = ir.news();
+            long id = item.id();
+            focusedId = id;
+            selectedIds.clear(); selectedIds.add(id); selectionAnchorId = id;
+            selected.set(item);                        // reader updates immediately (RSSOwl)
+            headlines.getDataProvider().refreshAll();  // highlight follows the cursor
+            if (readDelayMs == 0) {
+                markReadOnOpen(item);                  // "Instant"
+            } else if (readDelayMs > 0) {
+                UI ui = UI.getCurrent();
+                pendingDwell = DWELL_SCHEDULER.schedule(() -> ui.access(() -> {
+                    if (focusedId != null && focusedId == id) markReadOnOpen(item);
+                }), readDelayMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } // readDelayMs < 0 == "Off": show but never auto-mark
+        });
+
+        // Enter on the focused headline: unread -> read now; read -> mark unread (a deliberate toggle).
+        // (TreeGrid isn't a KeyNotifier, so listen at the DOM level, filtered to the Enter key.)
+        headlines.getElement().addEventListener("keydown", e -> onEnterKey())
+                .setFilter("event.key === 'Enter'");
 
         // Column customisation (RSSOwl persists per-column order/width/visibility): let the user
         // drag column headers to reorder and drag header edges to resize; persist either change.
@@ -1327,6 +1401,29 @@ public class HeadlinesView extends Div {
         news.setRead(subject, it.id(), true);            // persist per-user
         headlines.getDataProvider().refreshItem(new Row.ItemRow(it)); // de-bold this row
         refreshTreeCounts();                             // e.g. Fast Company (35) -> (34)
+    }
+
+    /** Cancel a pending keyboard auto-read dwell, if any. */
+    private void cancelDwell() {
+        if (pendingDwell != null) { pendingDwell.cancel(false); pendingDwell = null; }
+    }
+
+    /** Enter on the keyboard-focused headline: show it in the reader, then toggle its read state
+     *  (unread → read now; read → mark unread). Independent of the auto-read delay. */
+    private void onEnterKey() {
+        cancelDwell();
+        if (focusedId == null) return;
+        long id = focusedId;
+        NewsItem item = displayedItems().stream().filter(n -> n.id() == id).findFirst().orElse(null);
+        if (item == null) return;
+        selectedIds.clear(); selectedIds.add(id); selectionAnchorId = id;
+        selected.set(item);                 // show in reader
+        boolean nowRead = item.unread();    // unread → read now; read → mark unread
+        item.setRead(nowRead);
+        news.setRead(subject, id, nowRead); // persist per-user
+        headlines.getDataProvider().refreshItem(new Row.ItemRow(item));
+        refreshTreeCounts();
+        headlines.getDataProvider().refreshAll();
     }
 
     private void markReadBulk(List<Row.ItemRow> rows, boolean read) {

@@ -261,6 +261,27 @@ public class UserNewsService {
         userStates.save(st);
     }
 
+    /** Default auto-read delay when the user hasn't chosen one (ms): show on arrow, mark read after 0.5s. */
+    public static final int DEFAULT_READ_DELAY_MS = 500;
+
+    /** The user's keyboard auto-read delay in ms: -1 = off, 0 = instant, else the dwell. Defaults to
+     *  {@link #DEFAULT_READ_DELAY_MS}. See RSSOwl's {@code MARK_READ_STATE}/{@code MARK_READ_IN_MILLIS}. */
+    @Transactional(readOnly = true)
+    public int readDelayMs(String subject) {
+        return userStates.findByOwner(subject)
+                .map(com.example.headlines.data.UserState::getReadDelayMs)
+                .orElse(DEFAULT_READ_DELAY_MS);
+    }
+
+    /** Persist the user's keyboard auto-read delay. */
+    @Transactional
+    public void setReadDelayMs(String subject, int ms) {
+        com.example.headlines.data.UserState st = userStates.findByOwner(subject)
+                .orElseGet(() -> new com.example.headlines.data.UserState(subject));
+        st.setReadDelayMs(ms);
+        userStates.save(st);
+    }
+
     /** First-login bootstrap: give a brand-new user the default subscription set (from default_feeds.xml). */
     @Transactional
     public void ensureSeeded(String subject) {

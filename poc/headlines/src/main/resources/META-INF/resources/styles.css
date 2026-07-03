@@ -33,6 +33,14 @@ vaadin-grid::part(group) {
     background-color: #eef2f7 !important;
 }
 
+/* Keyboard cursor: a clear focus ring on the focused cell (base token, Aura-safe). The whole focused
+   row is also highlighted via the "selected" part, since cell-focus drives our selection. */
+vaadin-grid::part(focused-cell)::before {
+    outline: 2px solid var(--vaadin-focus-ring-color, #0b57d0);
+    outline-offset: -2px;
+    pointer-events: none;
+}
+
 /* Left feeds-tree: folders/feeds with unread items in bold (RSSOwl bolds anything with unread),
    normal + greyed once everything is read. */
 vaadin-grid::part(feed-category),

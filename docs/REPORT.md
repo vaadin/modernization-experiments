@@ -1175,6 +1175,41 @@ URLs ended in `.xml`. The modern web — CDNs, dynamic routes, cautious/again-mi
 just what the current library (ROME) does when you hand it the stream. A small, concrete example of "the
 rewrite inherits a decade of the ecosystem's hardening" rather than any cleverness on our part.
 
+### Day 20 — keyboard navigation, and porting RSSOwl's mark-read *model* but not its *granularity*
+
+The headline grid already had native keyboard cell-focus (arrows move a focused cell), but nothing
+reacted to it: moving the cursor didn't open the article, and Enter was inert. We wired it up — but the
+interesting part was a long design conversation about *what should happen*, and using RSSOwl's source to
+settle it.
+
+**What RSSOwl actually does (from the source):** selecting a headline (mouse or keyboard) shows it in the
+reader **immediately** and marks it read after a delay — `MARK_READ_STATE` (on/off) + `MARK_READ_IN_MILLIS`
+(`NewsTableControl`'s `MarkReadTracker`; default *instant*). Plus a family of siblings
+(`MARK_READ_ON_SCROLLING/ON_CHANGE/ON_MINIMIZE/ON_TAB_CLOSE`) and — notably — the whole thing is
+configurable **per feed** via a `ReadingPropertyPage`, not just globally.
+
+**A refinement we tried and rejected.** First cut deferred *both* the reader display and the mark-read to
+a dwell (so fast skimming wouldn't thrash the reader). The user rightly killed it: "showing the text after
+5 s and marking it read by then makes no sense, whereas showing it immediately and assuming it was read
+after that time is sound." That is exactly RSSOwl's model, and it's the right one. So: **arrow → show at
+once; mark read after an adjustable delay.**
+
+**What we built:** cell-focus drives an immediate reader update + highlight; a per-user, adjustable
+**Auto-read** delay (toolbar dropdown: Off / Instant / 0.5s / 1s / 2s / 5s, default 0.5s, persisted on
+`UserState`) governs when the focused article is marked read. `Off` shows but never auto-marks; `Instant`
+marks at once. Enter is a deliberate toggle (unread → read now; read → mark unread). Mouse selection
+(plain/Ctrl/Shift multi-select) is kept fully separate via a pointer flag so the keyboard path never
+clobbers a multi-selection. Verified end-to-end with Playwright (arrow shows immediately; 0.5s marks
+after the dwell; Off never marks; Enter toggles both ways; the setting persists across reload; Ctrl-click
+multi-select survives).
+
+**The scoping decision worth recording:** we deliberately made Auto-read a **single global (per-user)
+setting — NOT per-feed or per-thread**, even though RSSOwl exposes per-feed reading properties. The
+judgment (user's words): per-feed reading configuration is "labour of love, not anything people would use
+on a regular basis — probably nobody needs it." This is a recurring theme of the experiment: **port the
+original's behavior *model* faithfully, but drop rarely-used *granularity*** that adds UI and persistence
+surface for little real benefit. Fidelity to intent, not to every preference toggle.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_
@@ -1247,6 +1282,13 @@ _(This section is the point of the experiment and grows as we go.)_
   general modern-web robustness upgrade the migration got simply by using today's stack. (Fair caveat:
   RSSOwlnix is itself well-modernised elsewhere — Apache HttpClient 5, content-driven title/parse — so
   the failure is narrowly in the "is this even a feed?" step, not the whole pipeline.)
+- **Port the behavior *model*, drop rarely-used *granularity*.** Repeatedly the right move was to
+  reproduce what RSSOwl *does* while declining to reproduce every knob it exposes. Day 20's Auto-read
+  delay follows RSSOwl's mark-read model exactly (show now, mark read after a delay) but as a single
+  global per-user setting — **not** the per-feed `ReadingPropertyPage` the original ships. Judgment call
+  (user's words): per-feed reading config is "labour of love… probably nobody needs it." Fidelity to
+  intent beats fidelity to the preferences tree; a faithful migration is allowed to leave 2009's
+  seldom-touched options on the floor.
 
 ---
 

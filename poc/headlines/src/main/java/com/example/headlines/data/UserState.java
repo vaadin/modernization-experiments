@@ -21,9 +21,10 @@ import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 
 /**
- * Small per-user bookkeeping row, keyed by Keycloak subject. Currently holds {@code lastSeen} — when the
- * user last opened the app — so we can tell them how many articles are new since their last visit
- * (RSSOwl pops a notification when a refresh brings in new news).
+ * Small per-user bookkeeping row, keyed by Keycloak subject. Holds {@code lastSeen} — when the user last
+ * opened the app, so we can tell them how many articles are new since their last visit (RSSOwl pops a
+ * notification when a refresh brings in new news) — and {@code readDelayMs}, the user's auto-read delay
+ * for keyboard navigation (RSSOwl's {@code MARK_READ_STATE}/{@code MARK_READ_IN_MILLIS}).
  */
 @Entity
 @Table(name = "user_state", uniqueConstraints = @UniqueConstraint(columnNames = "owner"))
@@ -38,6 +39,10 @@ public class UserState {
 
     private LocalDateTime lastSeen; // null until the first visit is recorded
 
+    // Auto-read delay for keyboard navigation, in ms: -1 = off (never auto-mark), 0 = instant,
+    // else the dwell before the focused article is marked read. Null until the user changes it (→ default).
+    private Integer readDelayMs;
+
     protected UserState() { }
 
     public UserState(String owner) {
@@ -48,4 +53,6 @@ public class UserState {
     public String getOwner() { return owner; }
     public LocalDateTime getLastSeen() { return lastSeen; }
     public void setLastSeen(LocalDateTime lastSeen) { this.lastSeen = lastSeen; }
+    public Integer getReadDelayMs() { return readDelayMs; }
+    public void setReadDelayMs(Integer readDelayMs) { this.readDelayMs = readDelayMs; }
 }
