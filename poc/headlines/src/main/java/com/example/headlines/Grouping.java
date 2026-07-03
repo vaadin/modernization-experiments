@@ -29,9 +29,12 @@ import java.util.TreeMap;
 final class Grouping {
     private Grouping() {}
 
+    /** Mirrors RSSOwl's {@code NewsGrouping.Type} (labels verbatim, same order). Rating is omitted — we
+     *  have no per-item ratings. */
     enum GroupBy {
-        NONE("None"), DATE("Date"), STATE("Status"), AUTHOR("Author"),
-        CATEGORY("Category"), FEED("Feed"), STICKY("Sticky");
+        NONE("No Grouping"), DATE("Group by Date"), STATE("Group by State"), AUTHOR("Group by Author"),
+        CATEGORY("Group by Category"), TITLE("Group by Title"), FEED("Group by Feed"),
+        LABEL("Group by Label"), STICKY("Group by Stickyness");
         private final String label;
         GroupBy(String label) { this.label = label; }
         String label() { return label; }
@@ -49,8 +52,12 @@ final class Grouping {
             case STATE -> byState(items);
             case STICKY -> bySticky(items);
             case AUTHOR -> byKey(items, NewsItem::author, "Unknown");
-            case CATEGORY -> byKey(items, NewsItem::category, "Uncategorized");
+            // RSSOwl's Group-by-Category keys on the item's own <category> tags, not the folder.
+            case CATEGORY -> byKey(items, NewsItem::categories, "Uncategorized");
+            case TITLE -> byKey(items, NewsItem::title, "(untitled)");
             case FEED -> byKey(items, NewsItem::feed, "Unknown");
+            case LABEL -> byKey(items, n -> n.labels().isEmpty() ? null : n.labels().get(0).name(),
+                    "No Label");
         };
     }
 

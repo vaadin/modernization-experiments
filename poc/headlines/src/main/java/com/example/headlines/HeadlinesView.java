@@ -227,7 +227,11 @@ public class HeadlinesView extends Div {
         Button importOpml = new Button("Import", VaadinIcon.UPLOAD.create(), e -> openImportOpmlDialog());
         importOpml.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
         Anchor exportOpml = buildOpmlExportLink();
-        HorizontalLayout feedBar = new HorizontalLayout(addFeed, importOpml, exportOpml);
+        // RSSOwl's "New Saved Search": create a global full-text search shown as a smart folder.
+        Button newSearch = new Button("New Search", VaadinIcon.SEARCH.create(), e -> openNewSavedSearchDialog());
+        newSearch.addThemeVariants(ButtonVariant.LUMO_SMALL, ButtonVariant.LUMO_TERTIARY);
+        newSearch.getElement().setAttribute("title", "Create a saved search (smart folder)");
+        HorizontalLayout feedBar = new HorizontalLayout(addFeed, importOpml, exportOpml, newSearch);
         feedBar.setAlignItems(FlexComponent.Alignment.CENTER);
         feedBar.getStyle().set("padding", "0.3rem 0.5rem");
         VerticalLayout leftPane = new VerticalLayout(feedBar, feedTree);
@@ -525,23 +529,27 @@ public class HeadlinesView extends Div {
         dialog.open();
     }
 
-    /** Save the current query as a named saved search (shown as a smart folder in the tree). */
-    private void openSaveSearchDialog(String query) {
-        if (query == null || query.isBlank()) return;
+    /** RSSOwl's "New Saved Search": name + a full-text query, persisted as a smart folder in the tree. */
+    private void openNewSavedSearchDialog() {
         Dialog dialog = new Dialog();
-        dialog.setHeaderTitle("Save search");
+        dialog.setHeaderTitle("New Saved Search");
         dialog.setWidth("460px");
         TextField name = new TextField("Name");
         name.setWidthFull();
-        name.setValue(query); // sensible default: the query text
-        Span q = new Span("Query: " + query);
-        q.getStyle().set("color", "var(--vaadin-text-color-secondary, gray)").set("font-size", "var(--lumo-font-size-s)");
-        dialog.add(new VerticalLayout(name, q));
+        TextField query = new TextField("Search for");
+        query.setWidthFull();
+        query.setPlaceholder("words to match across all articles…");
+        dialog.add(new VerticalLayout(name, query));
         Button save = new Button("Save", e -> {
+            boolean bad = false;
             if (name.getValue() == null || name.getValue().isBlank()) {
-                name.setInvalid(true); name.setErrorMessage("A name is required"); return;
+                name.setInvalid(true); name.setErrorMessage("A name is required"); bad = true;
             }
-            news.createSavedSearch(subject, name.getValue().trim(), query);
+            if (query.getValue() == null || query.getValue().isBlank()) {
+                query.setInvalid(true); query.setErrorMessage("A search query is required"); bad = true;
+            }
+            if (bad) return;
+            news.createSavedSearch(subject, name.getValue().trim(), query.getValue().trim());
             reloadUserData();
             dialog.close();
             Notification.show("Saved search created");
@@ -834,10 +842,12 @@ public class HeadlinesView extends Div {
 
     private Component buildToolbar() {
         Select<GroupBy> groupBy = new Select<>();
-        groupBy.setLabel("Group by");
+        // Items already read "Group by …" (RSSOwl's labels), so no redundant field label.
         groupBy.setItems(GroupBy.values());
         groupBy.setItemLabelGenerator(GroupBy::label);
         groupBy.setValue(GroupBy.NONE);
+        groupBy.setWidth("13em");
+        groupBy.getElement().setAttribute("title", "Group the headlines");
         groupBy.addValueChangeListener(e -> {
             currentGroupBy = e.getValue();
             applyGrouping(currentGroupBy);
@@ -865,15 +875,10 @@ public class HeadlinesView extends Div {
             if (!searchTerm.isBlank()) applyGrouping(currentGroupBy);
         });
 
-        // Save the current filter as a global saved search (RSSOwl: persist a search as a smart folder).
-        Button saveSearch = new Button(VaadinIcon.BOOKMARK.create(), e -> openSaveSearchDialog(searchTerm));
-        saveSearch.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
-        saveSearch.getElement().setAttribute("title", "Save as a global saved search");
-        saveSearch.setEnabled(false);
-
+        // The filter bar is purely a live LOCAL filter (RSSOwl's Filter Bar has no "save" button). Creating
+        // a global saved search lives in its own "New Saved Search" action next to "Add feed".
         search.addValueChangeListener(e -> {
             searchTerm = e.getValue() == null ? "" : e.getValue().trim();
-            saveSearch.setEnabled(!searchTerm.isBlank());
             applyGrouping(currentGroupBy);
         });
 
@@ -961,7 +966,7 @@ public class HeadlinesView extends Div {
 
         Div spacer = new Div(); // flexible gap that pins the user pill to the far right
 
-        HorizontalLayout bar = new HorizontalLayout(groupBy, search, scope, saveSearch, columnsMenu, filters,
+        HorizontalLayout bar = new HorizontalLayout(groupBy, search, scope, columnsMenu, filters,
                 unreadToggle, autoRead, spacer, userGroup);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();

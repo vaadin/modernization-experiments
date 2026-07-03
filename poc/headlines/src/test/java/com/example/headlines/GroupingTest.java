@@ -67,4 +67,23 @@ class GroupingTest {
         var labels = Grouping.group(items, GroupBy.STICKY).stream().map(Bucket::label).toList();
         assertEquals(List.of("Sticky", "Not sticky"), labels);
     }
+
+    @Test
+    void byCategory_usesTheItemsRealTags_notTheFolder() {
+        NewsItem tech = item(1, "a", "Business", "f", State.UNREAD, false); // "Business" is the FOLDER
+        tech.setCategories("Tech");
+        NewsItem none = item(2, "a", "Business", "f", State.UNREAD, false); // no tags
+        var buckets = Grouping.group(List.of(tech, none), GroupBy.CATEGORY);
+        // Grouped by the real <category> tag "Tech" and the "Uncategorized" fallback — NOT by "Business".
+        assertEquals(List.of("Tech", "Uncategorized"), buckets.stream().map(Bucket::label).sorted().toList());
+    }
+
+    @Test
+    void byLabel_groupsByFirstLabel_withNoLabelFallback() {
+        NewsItem flagged = item(1, "a", "c", "f", State.UNREAD, false);
+        flagged.setLabels(List.of(new NewsItem.LabelRef(1, "Important", "#f00")));
+        NewsItem plain = item(2, "a", "c", "f", State.UNREAD, false);
+        var labels = Grouping.group(List.of(flagged, plain), GroupBy.LABEL).stream().map(Bucket::label).toList();
+        assertEquals(List.of("Important", "No Label"), labels); // alphabetical: "Important" < "No Label"
+    }
 }
