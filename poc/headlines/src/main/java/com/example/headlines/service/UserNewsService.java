@@ -282,6 +282,23 @@ public class UserNewsService {
         userStates.save(st);
     }
 
+    /** The user's persisted headline sort order (CSV of "columnKey:asc|desc" in priority order), or ""
+     *  if they've never sorted. */
+    @Transactional(readOnly = true)
+    public String newsSort(String subject) {
+        return userStates.findByOwner(subject)
+                .map(com.example.headlines.data.UserState::getNewsSort).orElse("");
+    }
+
+    /** Persist the user's headline sort order (multi-priority sort). */
+    @Transactional
+    public void setNewsSort(String subject, String csv) {
+        com.example.headlines.data.UserState st = userStates.findByOwner(subject)
+                .orElseGet(() -> new com.example.headlines.data.UserState(subject));
+        st.setNewsSort(csv);
+        userStates.save(st);
+    }
+
     /** First-login bootstrap: give a brand-new user the default subscription set (from default_feeds.xml). */
     @Transactional
     public void ensureSeeded(String subject) {

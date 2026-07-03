@@ -43,6 +43,11 @@ public class UserState {
     // else the dwell before the focused article is marked read. Null until the user changes it (→ default).
     private Integer readDelayMs;
 
+    // The headline grid's sort order, as a compact CSV of "columnKey:asc|desc" in priority order
+    // (e.g. "feed:asc,date:desc"). Null/empty until the user sorts (→ default date desc).
+    @Column(length = 512)
+    private String newsSort;
+
     protected UserState() { }
 
     public UserState(String owner) {
@@ -55,4 +60,6 @@ public class UserState {
     public void setLastSeen(LocalDateTime lastSeen) { this.lastSeen = lastSeen; }
     public Integer getReadDelayMs() { return readDelayMs; }
     public void setReadDelayMs(Integer readDelayMs) { this.readDelayMs = readDelayMs; }
+    public String getNewsSort() { return newsSort; }
+    public void setNewsSort(String newsSort) { this.newsSort = newsSort; }
 }

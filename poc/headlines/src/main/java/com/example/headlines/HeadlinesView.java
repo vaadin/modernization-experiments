@@ -201,6 +201,7 @@ public class HeadlinesView extends Div {
         configureHeadlines();
         applyColumnPrefs(); // restore this user's saved column order/width/visibility
         applyGrouping(GroupBy.NONE);
+        applySortPrefs();   // restore this user's saved multi-sort (or default Date DESC)
 
         Div reader = buildReactiveReader();
 
@@ -875,6 +876,9 @@ public class HeadlinesView extends Div {
         addColumnToggle(cols, "date", "Date");
         addColumnToggle(cols, "author", "Author");
         addColumnToggle(cols, "category", "Category");
+        addColumnToggle(cols, "feed", "Feed");
+        addColumnToggle(cols, "status", "Status");
+        addColumnToggle(cols, "sticky", "Sticky");
 
         // News filters (RSSOwl's rules engine: match conditions → actions).
         Button filters = new Button("Filters", VaadinIcon.FILTER.create(),
@@ -1006,6 +1010,25 @@ public class HeadlinesView extends Div {
                 .setComparator(rowCmp(Comparator.comparing(NewsItem::category, String.CASE_INSENSITIVE_ORDER)))
                 .setSortable(true);
 
+        // Additional RSSOwl columns — the remaining "group by" dimensions as sortable columns. Hidden by
+        // default (toggle on via the Columns menu); sorting them clusters items by that dimension.
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().feed() : "")
+                .setHeader("Feed").setKey("feed").setFlexGrow(1).setResizable(true)
+                .setComparator(rowCmp(Comparator.comparing(NewsItem::feed, String.CASE_INSENSITIVE_ORDER)))
+                .setSortable(true).setVisible(false);
+
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir ? statusLabel(ir.news().state()) : "")
+                .setHeader("Status").setKey("status").setWidth("110px").setFlexGrow(0).setResizable(true)
+                // Sort by state order (New/Updated/Unread/Read) — unread-ish first.
+                .setComparator(rowCmp(Comparator.comparingInt(n -> n.state().ordinal())))
+                .setSortable(true).setVisible(false);
+
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir && ir.news().sticky() ? "★" : "")
+                .setHeader("Sticky").setKey("sticky").setWidth("90px").setFlexGrow(0).setResizable(true)
+                // Sticky rows first when ascending.
+                .setComparator(rowCmp(Comparator.comparing(n -> !n.sticky())))
+                .setSortable(true).setVisible(false);
+
         headlines.setPartNameGenerator(row -> {
             if (row instanceof Row.GroupRow) return "group";
             Row.ItemRow ir = (Row.ItemRow) row;
@@ -1076,6 +1099,11 @@ public class HeadlinesView extends Div {
         com.vaadin.flow.component.Shortcuts.addShortcutListener(this, this::onEnterKey,
                 com.vaadin.flow.component.Key.ENTER).listenOn(headlines);
 
+        // Multi-priority sort (RSSOwl sorts by a single column; this is a Vaadin enhancement): clicking
+        // column headers in sequence builds a priority sort (1st click = primary, next = secondary, …),
+        // e.g. Feed ascending then Date descending. Persisted per user (see applySortPrefs / addSortListener).
+        headlines.setMultiSort(true, com.vaadin.flow.component.grid.Grid.MultiSortPriority.APPEND);
+
         // Column customisation (RSSOwl persists per-column order/width/visibility): let the user
         // drag column headers to reorder and drag header edges to resize; persist either change.
         headlines.setColumnReorderingAllowed(true);
@@ -1086,19 +1114,22 @@ public class HeadlinesView extends Div {
         });
         headlines.addColumnResizeListener(e -> persistColumnLayout());
 
-        // Direction-aware null handling for the Date column: when the user flips to ascending/descending,
-        // swap the null policy so undated rows stay at the bottom in BOTH directions (see applyDateNullPolicy).
         headlines.addSortListener(e -> {
-            if (adjustingDateSort) return;
-            e.getSortOrder().stream().filter(so -> so.getSorted() == dateColumn).findFirst().ifPresent(so -> {
-                adjustingDateSort = true;
-                try {
-                    applyDateNullPolicy(so.getDirection() == SortDirection.DESCENDING);
-                    headlines.getDataProvider().refreshAll(); // re-sort with the adjusted comparator
-                } finally {
-                    adjustingDateSort = false;
-                }
-            });
+            // Direction-aware null handling for the Date column: keep undated rows at the bottom in BOTH
+            // directions (see applyDateNullPolicy), even when Date is a secondary sort in a multi-sort.
+            if (!adjustingDateSort) {
+                e.getSortOrder().stream().filter(so -> so.getSorted() == dateColumn).findFirst().ifPresent(so -> {
+                    adjustingDateSort = true;
+                    try {
+                        applyDateNullPolicy(so.getDirection() == SortDirection.DESCENDING);
+                        headlines.getDataProvider().refreshAll(); // re-sort with the adjusted comparator
+                    } finally {
+                        adjustingDateSort = false;
+                    }
+                });
+            }
+            // Persist the user's sort order (only genuine user sorts, not our restore in applySortPrefs).
+            if (e.isFromClient()) news.setNewsSort(subject, serializeSort(e.getSortOrder()));
         });
 
         buildContextMenu();
@@ -1188,10 +1219,40 @@ public class HeadlinesView extends Div {
                     ? children.getOrDefault(g, List.of()) : List.of());
             headlines.expandRecursively(roots, 1);
         }
-        if (dateColumn != null) {
-            applyDateNullPolicy(true); // forced default = date DESC, undated rows last
-            headlines.sort(GridSortOrder.desc(dateColumn).build());
+        // Sort is no longer forced here — it persists across selections and is restored by applySortPrefs()
+        // (GridSortOrder lives on the columns and survives setItems). Default is applied once at init.
+    }
+
+    /** Restore this user's saved multi-sort (or default to Date descending on first use). */
+    private void applySortPrefs() {
+        List<GridSortOrder<Row>> order = new ArrayList<>();
+        String csv = news.newsSort(subject);
+        if (csv != null && !csv.isBlank()) {
+            for (String token : csv.split(",")) {
+                String[] kv = token.split(":");
+                Grid.Column<Row> c = headlines.getColumnByKey(kv[0].trim());
+                if (c == null) continue; // a column that no longer exists — skip
+                boolean asc = kv.length > 1 && kv[1].trim().equalsIgnoreCase("asc");
+                order.add(new GridSortOrder<>(c, asc ? SortDirection.ASCENDING : SortDirection.DESCENDING));
+            }
         }
+        if (order.isEmpty()) {
+            applyDateNullPolicy(true); // default = Date DESC, undated rows last
+            headlines.sort(GridSortOrder.desc(dateColumn).build());
+        } else {
+            order.stream().filter(so -> so.getSorted() == dateColumn).findFirst()
+                    .ifPresent(so -> applyDateNullPolicy(so.getDirection() == SortDirection.DESCENDING));
+            headlines.sort(order);
+        }
+    }
+
+    /** Serialize a sort order to the persisted CSV form ("columnKey:asc|desc" in priority order). */
+    private static String serializeSort(List<GridSortOrder<Row>> order) {
+        return order.stream()
+                .filter(so -> so.getSorted().getKey() != null)
+                .map(so -> so.getSorted().getKey() + ":"
+                        + (so.getDirection() == SortDirection.ASCENDING ? "asc" : "desc"))
+                .collect(Collectors.joining(","));
     }
 
     // --- bottom-right pane: reader ---
@@ -1516,6 +1577,16 @@ public class HeadlinesView extends Div {
         });
         icon.getElement().setAttribute("title", it.state().name());
         return icon;
+    }
+
+    /** Friendly text for the Status column (RSSOwl's state). */
+    private static String statusLabel(NewsItem.State state) {
+        return switch (state) {
+            case NEW -> "New";
+            case UPDATED -> "Updated";
+            case UNREAD -> "Unread";
+            case READ -> "Read";
+        };
     }
 
     // --- actions ---

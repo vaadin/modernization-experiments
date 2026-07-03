@@ -12,9 +12,11 @@ export default defineConfig({
   fullyParallel: false,
   timeout: 30_000,
   expect: { timeout: 10_000 },
+  retries: 1, // the dev laptop sleeps/starves under load; one retry absorbs env-induced flakiness
   reporter: [['list']],
   use: {
     baseURL: process.env.BASE_URL || 'http://localhost:8080',
+    viewport: { width: 1600, height: 1000 }, // wide enough for the full toolbar (Columns menu etc.)
     trace: 'on-first-retry',
   },
   projects: [

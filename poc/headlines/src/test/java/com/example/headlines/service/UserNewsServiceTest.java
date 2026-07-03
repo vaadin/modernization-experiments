@@ -137,6 +137,18 @@ class UserNewsServiceTest {
     }
 
     @Test
+    void newsSortPersistsPerUser() {
+        assertEquals("", svc.newsSort(ALICE), "no sort saved yet → empty");
+
+        svc.setNewsSort(ALICE, "feed:asc,date:desc");
+        assertEquals("feed:asc,date:desc", svc.newsSort(ALICE), "alice's multi-sort persists");
+        assertEquals("", svc.newsSort(BOB), "bob keeps the default (per-user)");
+
+        svc.setNewsSort(ALICE, "title:asc"); // overwrite
+        assertEquals("title:asc", svc.newsSort(ALICE), "re-saving overwrites");
+    }
+
+    @Test
     void labelsArePerUserAndExposedOnNewsItem() {
         Feed f = feeds.save(new Feed("https://feed", "F", null));
         Article a = articles.save(new Article(f, null, "https://x/1", "Item", "a", LocalDateTime.now(), false));
