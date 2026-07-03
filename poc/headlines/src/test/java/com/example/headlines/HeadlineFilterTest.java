@@ -56,16 +56,8 @@ class HeadlineFilterTest {
     }
 
     @Test
-    void authorAndCategoryScopesMatchTheirFields() {
-        assertTrue(m(KERNEL, Scope.AUTHOR, "torvalds"), "author scope matches author");
-        assertFalse(m(KERNEL, Scope.AUTHOR, "linux"), "author scope ignores the title");
-        assertTrue(m(KERNEL, Scope.CATEGORY, "software"), "category scope matches category");
-        assertFalse(m(KERNEL, Scope.CATEGORY, "linus"), "category scope ignores the author");
-    }
-
-    @Test
-    void entireScopeMatchesAnyFieldIncludingBody() {
-        assertTrue(m(KERNEL, Scope.ENTIRE, "linux"), "entire matches title");
+    void entireScopeMatchesTitleAndAllOtherFieldsIncludingBody() {
+        assertTrue(m(KERNEL, Scope.ENTIRE, "linux"), "entire includes the title");
         assertTrue(m(KERNEL, Scope.ENTIRE, "torvalds"), "entire matches author");
         assertTrue(m(KERNEL, Scope.ENTIRE, "software"), "entire matches category");
         assertTrue(m(KERNEL, Scope.ENTIRE, "lwn"), "entire matches feed");
@@ -77,7 +69,7 @@ class HeadlineFilterTest {
     void tolerantOfNullFields() {
         NewsItem sparse = item("Just a title", null, null, "Feed", null);
         assertTrue(m(sparse, Scope.TITLE, "title"), "title still matches");
-        assertFalse(m(sparse, Scope.AUTHOR, "x"), "null author never matches (no NPE)");
-        assertFalse(m(sparse, Scope.ENTIRE, "missing"), "null fields are skipped safely");
+        assertTrue(m(sparse, Scope.ENTIRE, "title"), "entire still matches the title");
+        assertFalse(m(sparse, Scope.ENTIRE, "missing"), "null fields are skipped safely (no NPE)");
     }
 }

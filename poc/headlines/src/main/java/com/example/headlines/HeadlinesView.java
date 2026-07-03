@@ -822,20 +822,21 @@ public class HeadlinesView extends Div {
         // RSSOwl's SearchTarget and defaulting to the title. (Global full-text stays available via saved
         // searches; the News Filters dialog is the separate conditions→actions rules engine.)
         TextField search = new TextField();
-        search.setPlaceholder("Filter headlines…");
+        search.setPlaceholder(filterScope.placeholder()); // grey hint tracks the scope (Title / Entire article)
         search.setClearButtonVisible(true);
         search.setValueChangeMode(com.vaadin.flow.data.value.ValueChangeMode.LAZY);
         search.setPrefixComponent(VaadinIcon.FILTER.create());
 
-        // Scope selector (RSSOwl: Headline / Entire News / Author / Category), defaulting to Title.
+        // Scope selector — Title (default) or Entire article. "Entire article" also includes the title.
         Select<HeadlineFilter.Scope> scope = new Select<>();
         scope.setItems(HeadlineFilter.Scope.values());
         scope.setItemLabelGenerator(HeadlineFilter.Scope::label);
         scope.setValue(filterScope);
-        scope.setWidth("8.5em");
+        scope.setWidth("9em");
         scope.getElement().setAttribute("title", "What the filter text matches");
         scope.addValueChangeListener(e -> {
             filterScope = e.getValue();
+            search.setPlaceholder(filterScope.placeholder()); // update the grey hint to match the scope
             if (!searchTerm.isBlank()) applyGrouping(currentGroupBy);
         });
 
@@ -1182,6 +1183,7 @@ public class HeadlinesView extends Div {
     private Div buildReactiveReader() {
         Div reader = new Div();
         reader.setSizeFull();
+        reader.addClassName("article-reader"); // forces an always-visible scrollbar (see styles.css)
         reader.getStyle().set("padding", "1rem").set("overflow", "auto");
         Signal.effect(reader, () -> {
             NewsItem it = selected.get();

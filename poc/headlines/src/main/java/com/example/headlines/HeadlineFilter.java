@@ -19,28 +19,28 @@ package com.example.headlines;
 public final class HeadlineFilter {
     private HeadlineFilter() { }
 
-    /** What the typed text is matched against — mirrors RSSOwl's {@code NewsFilter.SearchTarget}. */
+    /** What the typed text is matched against. {@code ENTIRE} always includes the title. Each scope
+     *  carries the placeholder hint shown in the (empty) filter box. */
     public enum Scope {
-        TITLE("Title"),            // RSSOwl's HEADLINE (default)
-        ENTIRE("Entire article"),  // RSSOwl's ALL / Entire News
-        AUTHOR("Author"),
-        CATEGORY("Category");
+        TITLE("Title", "Filter by title…"),
+        ENTIRE("Entire article", "Filter the whole article…");
 
         private final String label;
-        Scope(String label) { this.label = label; }
+        private final String placeholder;
+        Scope(String label, String placeholder) { this.label = label; this.placeholder = placeholder; }
         public String label() { return label; }
+        public String placeholder() { return placeholder; }
     }
 
     /**
      * True if {@code n} matches {@code termLower} (assumed already lower-cased) under {@code scope}.
-     * A null/blank term matches everything (no filtering).
+     * A null/blank term matches everything (no filtering). {@code ENTIRE} includes the title as well as
+     * the author, category, feed and body.
      */
     public static boolean matches(NewsItem n, Scope scope, String termLower) {
         if (termLower == null || termLower.isBlank()) return true;
         return switch (scope) {
             case TITLE -> contains(n.title(), termLower);
-            case AUTHOR -> contains(n.author(), termLower);
-            case CATEGORY -> contains(n.category(), termLower);
             case ENTIRE -> contains(n.title(), termLower) || contains(n.author(), termLower)
                     || contains(n.category(), termLower) || contains(n.feed(), termLower)
                     || contains(n.content(), termLower); // raw HTML content — cheap superstring match

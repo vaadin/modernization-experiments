@@ -2,12 +2,13 @@ import { test, expect, Page } from '@playwright/test';
 
 /**
  * E2E tests for the RSSOwl-style Filter Bar: a live, LOCAL filter of the currently displayed
- * headlines, defaulting to the title, with a scope selector (Title / Entire article / Author /
- * Category). Mirrors RSSOwl's news-view FilterBar (SearchTarget = Headline by default).
+ * headlines, defaulting to the title, with a scope selector (Title / Entire article). Mirrors RSSOwl's
+ * news-view FilterBar (SearchTarget = Headline by default). The placeholder tracks the scope, so target
+ * the input by its "Filter" prefix rather than the exact text.
  */
 
-const FILTER = 'input[placeholder="Filter headlines…"]';
 const SCOPE = 'vaadin-select[title="What the filter text matches"]';
+const filterBox = (page: Page) => page.locator('input[placeholder^="Filter"]');
 
 /** Titles of the currently rendered headline rows (reads the Vaadin grid's slotted cell content). */
 async function visibleTitles(page: Page): Promise<string[]> {
@@ -25,11 +26,11 @@ async function visibleTitles(page: Page): Promise<string[]> {
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator(FILTER)).toBeVisible();
+  await expect(filterBox(page)).toBeVisible();
 });
 
 test('Title scope (default) narrows the list to title matches only', async ({ page }) => {
-  await page.fill(FILTER, 'Linux');
+  await filterBox(page).fill('Linux');
 
   await expect
     .poll(async () => (await visibleTitles(page)).length, { message: 'some rows match' })
@@ -42,16 +43,16 @@ test('Title scope (default) narrows the list to title matches only', async ({ pa
 });
 
 test('Clearing the filter restores non-matching rows', async ({ page }) => {
-  await page.fill(FILTER, 'Linux');
+  await filterBox(page).fill('Linux');
   await expect.poll(async () => (await visibleTitles(page)).every((t) => /linux/i.test(t))).toBe(true);
 
-  await page.fill(FILTER, '');
+  await filterBox(page).fill('');
   // With no filter, the list shows rows whose titles do NOT all contain "linux".
   await expect.poll(async () => (await visibleTitles(page)).some((t) => !/linux/i.test(t))).toBe(true);
 });
 
 test('Entire-article scope broadens matching beyond the title', async ({ page }) => {
-  await page.fill(FILTER, 'Linux');
+  await filterBox(page).fill('Linux');
   await expect.poll(async () => (await visibleTitles(page)).every((t) => /linux/i.test(t))).toBe(true);
 
   // Switch scope Title -> Entire article.

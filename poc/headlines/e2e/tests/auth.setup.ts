@@ -13,7 +13,8 @@ setup('authenticate as alice', async ({ page }) => {
     await page.click('input[type="submit"], button[type="submit"]');
   }
 
-  // Back in the app: the toolbar Filter Bar is present once the view has rendered.
-  await expect(page.locator('input[placeholder="Filter headlines…"]')).toBeVisible({ timeout: 20_000 });
+  // Back in the app: the toolbar Filter Bar is present once the view has rendered. Its placeholder
+  // tracks the scope ("Filter by title…" / "Filter the whole article…"), so match on the "Filter" prefix.
+  await expect(page.locator('input[placeholder^="Filter"]')).toBeVisible({ timeout: 20_000 });
   await page.context().storageState({ path: AUTH_FILE });
 });

@@ -77,3 +77,25 @@ vaadin-grid::part(feed-saved-read) {
     max-width: 100%;
     height: auto;
 }
+
+/* Reader pane: force an always-visible scrollbar for long articles. macOS uses overlay scrollbars that
+   hide until you scroll; styling ::-webkit-scrollbar opts into a classic, always-shown bar, and
+   scrollbar-gutter reserves the space so text doesn't reflow when it appears. */
+.article-reader {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin; /* Firefox */
+}
+.article-reader::-webkit-scrollbar {
+    width: 12px;
+}
+.article-reader::-webkit-scrollbar-thumb {
+    background: var(--vaadin-border-color, rgba(0, 0, 0, 0.28));
+    border-radius: 6px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+}
+.article-reader::-webkit-scrollbar-thumb:hover {
+    background: var(--vaadin-text-color-secondary, rgba(0, 0, 0, 0.45));
+    background-clip: padding-box;
+    border: 3px solid transparent;
+}
