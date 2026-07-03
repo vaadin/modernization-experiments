@@ -120,6 +120,7 @@ public class HeadlinesView extends Div {
     private List<NewsItem> allItems; // reloaded after add/unsubscribe
     private List<NewsItem> currentItems; // the feed/folder/smart-folder selection
     private String searchTerm = "";      // live headline filter (empty = no filter)
+    private HeadlineFilter.Scope filterScope = HeadlineFilter.Scope.TITLE; // RSSOwl's SearchTarget, default headline
     private GroupBy currentGroupBy = GroupBy.NONE;
 
     private final TreeGrid<FeedNode> feedTree = new TreeGrid<>();
@@ -817,17 +818,31 @@ public class HeadlinesView extends Div {
             applyGrouping(currentGroupBy);
         });
 
-        // Live headline search (title / author / feed), narrowing the current selection.
+        // RSSOwl's Filter Bar: a LIVE, LOCAL filter of the currently displayed headlines, scoped like
+        // RSSOwl's SearchTarget and defaulting to the title. (Global full-text stays available via saved
+        // searches; the News Filters dialog is the separate conditions→actions rules engine.)
         TextField search = new TextField();
-        search.setPlaceholder("Search all articles…");
+        search.setPlaceholder("Filter headlines…");
         search.setClearButtonVisible(true);
         search.setValueChangeMode(com.vaadin.flow.data.value.ValueChangeMode.LAZY);
-        search.setPrefixComponent(VaadinIcon.SEARCH.create());
+        search.setPrefixComponent(VaadinIcon.FILTER.create());
 
-        // Save the current query as a saved search (RSSOwl: persist a search as a smart folder).
+        // Scope selector (RSSOwl: Headline / Entire News / Author / Category), defaulting to Title.
+        Select<HeadlineFilter.Scope> scope = new Select<>();
+        scope.setItems(HeadlineFilter.Scope.values());
+        scope.setItemLabelGenerator(HeadlineFilter.Scope::label);
+        scope.setValue(filterScope);
+        scope.setWidth("8.5em");
+        scope.getElement().setAttribute("title", "What the filter text matches");
+        scope.addValueChangeListener(e -> {
+            filterScope = e.getValue();
+            if (!searchTerm.isBlank()) applyGrouping(currentGroupBy);
+        });
+
+        // Save the current filter as a global saved search (RSSOwl: persist a search as a smart folder).
         Button saveSearch = new Button(VaadinIcon.BOOKMARK.create(), e -> openSaveSearchDialog(searchTerm));
         saveSearch.addThemeVariants(ButtonVariant.LUMO_TERTIARY, ButtonVariant.LUMO_SMALL);
-        saveSearch.getElement().setAttribute("title", "Save this search");
+        saveSearch.getElement().setAttribute("title", "Save as a global saved search");
         saveSearch.setEnabled(false);
 
         search.addValueChangeListener(e -> {
@@ -916,7 +931,7 @@ public class HeadlinesView extends Div {
 
         Div spacer = new Div(); // flexible gap that pins the user pill to the far right
 
-        HorizontalLayout bar = new HorizontalLayout(groupBy, search, saveSearch, columnsMenu, filters,
+        HorizontalLayout bar = new HorizontalLayout(groupBy, search, scope, saveSearch, columnsMenu, filters,
                 unreadToggle, autoRead, spacer, userGroup);
         bar.setAlignItems(FlexComponent.Alignment.END);
         bar.setWidthFull();
@@ -1527,7 +1542,12 @@ public class HeadlinesView extends Div {
      * field-scoped {@code title:...} queries) — so search reaches beyond the loaded selection.
      */
     private List<NewsItem> displayedItems() {
-        List<NewsItem> base = searchTerm.isBlank() ? currentItems : news.search(subject, searchTerm);
+        // RSSOwl Filter Bar: narrow the CURRENT selection live by the scoped filter text (default: title).
+        List<NewsItem> base = currentItems;
+        if (!searchTerm.isBlank()) {
+            String t = searchTerm.toLowerCase();
+            base = base.stream().filter(n -> HeadlineFilter.matches(n, filterScope, t)).toList();
+        }
         if (unreadOnly) return base.stream().filter(NewsItem::unread).toList(); // RSSOwl's "Unread" view mode
         return base;
     }

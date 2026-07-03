@@ -1210,6 +1210,40 @@ on a regular basis — probably nobody needs it." This is a recurring theme of t
 original's behavior *model* faithfully, but drop rarely-used *granularity*** that adds UI and persistence
 surface for little real benefit. Fidelity to intent, not to every preference toggle.
 
+### Day 21 — three things called "filter", and making ours match RSSOwl (with Playwright tests)
+
+Testing surfaced a genuine confusion: the app had **three different "filter-ish" features** that the
+user (reasonably) conflated:
+
+1. **Search box** ("Search all articles…") — a **global Lucene full-text** search (title *and* body,
+   all feeds), replacing the view with matches.
+2. **"Filters"** dialog — RSSOwl's **rules engine**: *conditions → actions*. A rule `title contains
+   "Linux" → (no actions)` matches items but does nothing (no action), so "Apply now" looked broken.
+3. **"Unread only"** — a real display filter.
+
+None of them was the obvious thing the user wanted: *type text and see only matching headlines in the
+current list*. So we asked what the **real RSSOwl** does — and the source settled it. RSSOwl's news view
+has a **Filter Bar** (`FilterBar` + `NewsFilter` in the feed editor): a live, **local** filter of the
+currently-displayed news, with a text field whose default scope is **`SearchTarget.HEADLINE`** (the
+title), a scope dropdown (Headline / Entire News / Author / Category), and a state dropdown (All / New /
+Unread / …). It is *not* a global search; global search is separate (Saved Searches), and the rules
+engine is separate again (Tools → News Filters). Our toolbar box had been built as the global search —
+the odd one out. The user's "Linux in the title" expectation was simply **RSSOwl's default behavior**.
+
+**Fix:** turned the toolbar box into RSSOwl's Filter Bar — a live, local filter of the current selection
+(`HeadlineFilter.matches`), **defaulting to Title**, with a scope selector (Title / Entire article /
+Author / Category). Global full-text stays reachable via saved searches; the "Unread only" toggle already
+covers RSSOwl's state filter. Verified: with "Linux" every visible row has *Linux in the title*; switching
+to *Entire article* broadens to body/feed/author matches.
+
+**Testing note — a new tier.** Two features in a row ("Enter does nothing", "filtering does nothing")
+worked in every automated check but not for the user — the classic **stale-client / expectation-gap**
+trap. So beyond the usual headless JUnit (added `HeadlineFilterTest`, 5 cases, and `toggleRead` service
+tests), we added a **Playwright E2E tier** (`poc/headlines/e2e/`): a real browser logs in through
+Keycloak once, then drives the Filter Bar and asserts the visible rows. 4/4 green. The earlier note that
+"RSSOwl tests = headless JUnit, not UI/E2E" now has a deliberate exception: UI-wiring bugs that headless
+tests structurally cannot catch get a browser test.
+
 ## Honest findings so far
 
 _(This section is the point of the experiment and grows as we go.)_
