@@ -1088,7 +1088,18 @@ public class HeadlinesView extends Div {
         Span attHeader = new Span("📎");
         attHeader.getElement().setAttribute("title", "Attachments");
         attHeader.getStyle().set("opacity", "0.4");
-        headlines.addColumn(row -> row instanceof Row.ItemRow ir && ir.news().attachments() ? "📎" : "")
+        headlines.addComponentColumn(row -> {
+                    if (row instanceof Row.ItemRow ir && !ir.news().enclosures().isEmpty()) {
+                        NewsItem.Enclosure first = ir.news().enclosures().get(0);
+                        Anchor a = new Anchor(first.url(), "📎"); // click to open/download the attachment
+                        a.setTarget("_blank");
+                        a.getElement().setAttribute("rel", "noopener");
+                        int n = ir.news().enclosures().size();
+                        a.getElement().setAttribute("title", n == 1 ? "Open attachment" : "Open first of " + n + " attachments");
+                        return a;
+                    }
+                    return new Span("");
+                })
                 .setHeader(attHeader).setKey("attachments").setWidth("56px").setFlexGrow(0).setResizable(false)
                 .setComparator(rowCmp(Comparator.comparing(n -> !n.attachments()))) // with-attachments first when asc
                 .setSortable(true).setVisible(false);
@@ -1348,6 +1359,47 @@ public class HeadlinesView extends Div {
 
     // --- bottom-right pane: reader ---
 
+    /** RSSOwl's attachments: list each enclosure as an open/download link (opens in a new tab; the browser
+     *  then plays or saves it). Shown under the article body when the item carries enclosures. */
+    private Component buildAttachmentsSection(NewsItem it) {
+        Div box = new Div();
+        box.getStyle().set("margin-top", "1rem").set("padding-top", "0.5rem")
+                .set("border-top", "1px solid var(--vaadin-border-color-secondary)");
+        Span header = new Span("📎 Attachments");
+        header.getStyle().set("font-weight", "var(--aura-font-weight-semibold, 600)");
+        box.add(header);
+        for (NewsItem.Enclosure e : it.enclosures()) {
+            Anchor a = new Anchor(e.url(), attachmentLabel(e));
+            a.setTarget("_blank");
+            a.getElement().setAttribute("rel", "noopener");
+            Div line = new Div(a);
+            line.getStyle().set("margin", "0.2rem 0");
+            box.add(line);
+        }
+        return box;
+    }
+
+    /** "filename (type, size)" for an enclosure link. */
+    private static String attachmentLabel(NewsItem.Enclosure e) {
+        String name = e.url();
+        int q = name.indexOf('?');
+        if (q >= 0) name = name.substring(0, q);
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0 && slash < name.length() - 1) name = name.substring(slash + 1);
+        if (name.isBlank()) name = e.url();
+        StringBuilder meta = new StringBuilder();
+        if (e.type() != null && !e.type().isBlank()) meta.append(e.type());
+        if (e.length() > 0) { if (meta.length() > 0) meta.append(", "); meta.append(humanSize(e.length())); }
+        return meta.length() > 0 ? name + "  (" + meta + ")" : name;
+    }
+
+    private static String humanSize(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return Math.round(bytes / 1024.0) + " KB";
+        if (bytes < 1024L * 1024 * 1024) return Math.round(bytes / (1024.0 * 1024)) + " MB";
+        return String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024));
+    }
+
     private Div buildReactiveReader() {
         Div reader = new Div();
         reader.setSizeFull();
@@ -1377,6 +1429,8 @@ public class HeadlinesView extends Div {
             if (!body.isBlank()) {
                 reader.add(new Html("<div class=\"article-content\">" + body + "</div>"));
             }
+
+            if (!it.enclosures().isEmpty()) reader.add(buildAttachmentsSection(it)); // RSSOwl attachments
 
             reader.add(buildReaderFooter(it)); // per-article action bar (RSSOwl's footer toolbar)
         });

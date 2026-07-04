@@ -68,6 +68,11 @@ public class Article {
     @Column(length = 1024)
     private String categories;
 
+    /** The item's downloadable attachments (RSS/Atom {@code <enclosure>}), encoded one per line as
+     *  "url\ttype\tlength" (see {@code NewsItem.encodeEnclosures}). Empty/null when there are none. */
+    @Column(length = 4096)
+    private String enclosures;
+
     /** The article's HTML body/summary as supplied by the feed (RSS description / Atom content),
      *  shown in the reader pane. Sanitized at render time, not here. Nullable; can be large -> CLOB. */
     @Lob
@@ -99,8 +104,11 @@ public class Article {
     public String getAuthor() { return author; }
     public LocalDateTime getPublishedDate() { return publishedDate; }
     public boolean isAttachments() { return attachments; }
+    public void setAttachments(boolean attachments) { this.attachments = attachments; }
     public String getCategories() { return categories; }
     public void setCategories(String categories) { this.categories = categories; }
+    public String getEnclosures() { return enclosures; }
+    public void setEnclosures(String enclosures) { this.enclosures = enclosures; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
     public String getContentText() { return contentText; }

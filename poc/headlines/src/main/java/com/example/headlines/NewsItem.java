@@ -31,6 +31,10 @@ public class NewsItem {
     /** A label assigned to this item, resolved from the user's {@code Label}s for display. */
     public record LabelRef(long id, String name, String color) {}
 
+    /** An RSS/Atom {@code <enclosure>}: a downloadable media file (podcast audio, PDF, image, …). RSSOwl's
+     *  "attachment". {@code length} is the size in bytes (0 when the feed omits it). */
+    public record Enclosure(String url, String type, long length) {}
+
     private final long id;
     private final String title;
     private final String author;
@@ -42,6 +46,7 @@ public class NewsItem {
     private boolean sticky;
     private String labelColor; // legacy single colour (fixture/back-compat); see labels for the real set
     private final List<LabelRef> labels = new ArrayList<>(); // user labels assigned (multi-label)
+    private final List<Enclosure> enclosures = new ArrayList<>(); // downloadable attachments; set after ctor
     private final String link;
     private final boolean attachments; // RSS enclosure present -> "News with Attachments"
     private String content; // article HTML/summary from the feed; set after construction, may be null
@@ -95,9 +100,43 @@ public class NewsItem {
     public String labelColor() { return labels.isEmpty() ? labelColor : labels.get(0).color(); }
     public String link() { return link; }
     public boolean attachments() { return attachments; }
+    /** The item's downloadable attachments (may be empty). */
+    public List<Enclosure> enclosures() { return enclosures; }
+    public void setEnclosures(List<Enclosure> encs) {
+        enclosures.clear();
+        if (encs != null) enclosures.addAll(encs);
+    }
     public String content() { return content; }
     public void setContent(String content) { this.content = content; }
     public void setCategories(String categories) { this.categories = categories; }
+
+    // Enclosures persist on Article as one line per enclosure, tab-separated "url\ttype\tlength". URLs
+    // carry no tabs/newlines, so this round-trips safely without a JSON dependency or an extra table.
+    public static String encodeEnclosures(List<Enclosure> encs) {
+        if (encs == null || encs.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (Enclosure e : encs) {
+            if (e.url() == null || e.url().isBlank()) continue;
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(e.url()).append('\t').append(e.type() == null ? "" : e.type())
+              .append('\t').append(e.length());
+        }
+        return sb.toString();
+    }
+
+    public static List<Enclosure> decodeEnclosures(String encoded) {
+        List<Enclosure> out = new ArrayList<>();
+        if (encoded == null || encoded.isBlank()) return out;
+        for (String line : encoded.split("\n")) {
+            String[] f = line.split("\t", -1);
+            if (f.length < 1 || f[0].isBlank()) continue;
+            String type = f.length > 1 && !f[1].isBlank() ? f[1] : null;
+            long len = 0;
+            if (f.length > 2) { try { len = Long.parseLong(f[2].trim()); } catch (NumberFormatException ignore) {} }
+            out.add(new Enclosure(f[0], type, len));
+        }
+        return out;
+    }
 
     /** Bold in RSSOwl when NEW, UPDATED or UNREAD (see {@code NewsTableLabelProvider.getFont}). */
     public boolean unread() {

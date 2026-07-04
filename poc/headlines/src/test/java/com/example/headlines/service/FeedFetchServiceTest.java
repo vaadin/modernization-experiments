@@ -30,6 +30,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Public-fetch tests for {@link FeedFetchService}: RSS parsing, de-duplication by (feed, link), and
@@ -48,6 +49,7 @@ class FeedFetchServiceTest {
     private String url;
     private volatile int itemCount;
     private volatile boolean withCategories;
+    private volatile boolean withEnclosure;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -73,6 +75,8 @@ class FeedFetchServiceTest {
             sb.append("<item><title>Item ").append(i).append("</title>")
               .append("<link>https://example/").append(i).append("</link>");
             if (withCategories) sb.append("<category>Tech</category><category>Business</category>");
+            if (withEnclosure) sb.append("<enclosure url=\"https://example/media")
+                    .append(i).append(".mp3\" type=\"audio/mpeg\" length=\"12345\"/>");
             sb.append("</item>");
         }
         return sb.append("</channel></rss>").toString();
@@ -103,6 +107,37 @@ class FeedFetchServiceTest {
         svc.refreshPublic(url);
         String cats = articles.findByFeedAndOwnerIsNull(f).get(0).getCategories();
         assertEquals("Tech, Business", cats, "article's own <category> tags, comma-joined (RSSOwl Category)");
+    }
+
+    @Test
+    void parsesRssEnclosureIntoArticleAttachments() {
+        itemCount = 1;
+        withEnclosure = true;
+        Feed f = feeds.save(new Feed(url, "T", null));
+        svc.refreshPublic(url);
+        com.example.headlines.data.Article a = articles.findByFeedAndOwnerIsNull(f).get(0);
+        assertTrue(a.isAttachments(), "enclosure present -> attachments flag set");
+        var encs = com.example.headlines.NewsItem.decodeEnclosures(a.getEnclosures());
+        assertEquals(1, encs.size());
+        assertEquals("https://example/media0.mp3", encs.get(0).url());
+        assertEquals("audio/mpeg", encs.get(0).type());
+        assertEquals(12345L, encs.get(0).length());
+    }
+
+    @Test
+    void backfillsEnclosuresOnExistingArticleOnRefetch() {
+        itemCount = 1;
+        Feed f = feeds.save(new Feed(url, "T", null));
+        withEnclosure = false;
+        svc.refreshPublic(url); // stored before the feed advertises an enclosure
+        assertTrue(com.example.headlines.NewsItem.decodeEnclosures(
+                articles.findByFeedAndOwnerIsNull(f).get(0).getEnclosures()).isEmpty());
+        withEnclosure = true;
+        svc.refreshPublic(url); // same link now carries an enclosure -> backfilled, not duplicated
+        var list = articles.findByFeedAndOwnerIsNull(f);
+        assertEquals(1, list.size(), "no duplicate created");
+        assertTrue(list.get(0).isAttachments());
+        assertEquals(1, com.example.headlines.NewsItem.decodeEnclosures(list.get(0).getEnclosures()).size());
     }
 
     @Test

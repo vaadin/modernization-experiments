@@ -10,6 +10,7 @@
 
 package com.example.headlines.service;
 
+import com.example.headlines.NewsItem;
 import com.example.headlines.data.Article;
 import com.example.headlines.data.ArticleRepository;
 import com.example.headlines.data.Feed;
@@ -80,7 +81,7 @@ public class FeedFetchService {
     }
 
     private record Raw(String link, String title, String author, LocalDateTime date, boolean attachments,
-            String content, String categories) {}
+            String content, String categories, String enclosures) {}
 
     @PostConstruct
     void init() {
@@ -217,11 +218,12 @@ public class FeedFetchService {
             for (SyndEntry e : feed.getEntries()) {
                 String link = e.getLink();
                 if (link == null || link.isBlank()) continue;
-                boolean att = e.getEnclosures() != null && !e.getEnclosures().isEmpty();
+                String encs = extractEnclosures(e);
+                boolean att = !encs.isBlank();
                 out.add(new Raw(link, blankTo(e.getTitle(), "(untitled)").strip(),
                         e.getAuthor() == null ? "" : e.getAuthor().strip(), // leave blank when absent (RSSOwl-style)
                         toLocalDateTime(e.getPublishedDate() != null ? e.getPublishedDate() : e.getUpdatedDate()),
-                        att, extractContent(e), extractCategories(e)));
+                        att, extractContent(e), extractCategories(e), encs));
             }
         }
         out.sort(Comparator.comparing(Raw::date, Comparator.nullsLast(Comparator.reverseOrder())));
@@ -241,6 +243,18 @@ public class FeedFetchService {
         return e.getDescription() != null ? e.getDescription().getValue() : null;
     }
 
+    /** The item's enclosures (RSS/Atom {@code <enclosure>}) encoded for {@link com.example.headlines.data.Article};
+     *  "" when none. See {@link NewsItem#encodeEnclosures}. */
+    private static String extractEnclosures(SyndEntry e) {
+        if (e.getEnclosures() == null || e.getEnclosures().isEmpty()) return "";
+        java.util.List<NewsItem.Enclosure> list = new ArrayList<>();
+        for (com.rometools.rome.feed.synd.SyndEnclosure enc : e.getEnclosures()) {
+            if (enc.getUrl() == null || enc.getUrl().isBlank()) continue;
+            list.add(new NewsItem.Enclosure(enc.getUrl().strip(), enc.getType(), Math.max(0, enc.getLength())));
+        }
+        return NewsItem.encodeEnclosures(list);
+    }
+
     /** The article's own categories/tags (RSS/Atom {@code <category>}), comma-joined; "" when none.
      *  This is RSSOwl's "Category" — the item's tags, distinct from the feed's folder/location. */
     private static String extractCategories(SyndEntry e) {
@@ -258,21 +272,45 @@ public class FeedFetchService {
     int persist(Feed feed, String owner, List<Raw> raws) {
         int saved = 0;
         for (Raw r : raws) {
-            boolean exists = (owner == null)
-                    ? articles.findByFeedAndLinkAndOwnerIsNull(feed, r.link()).isPresent()
-                    : articles.findByFeedAndLinkAndOwner(feed, r.link(), owner).isPresent();
-            if (!exists) {
-                Article a = new Article(feed, owner, r.link(), r.title(), r.author(), r.date(), r.attachments());
-                a.setCategories(r.categories());
-                a.setContent(r.content());
-                a.setContentText(com.example.headlines.ArticleHtml.toPlainText(r.content())); // for the FT index
-                articles.save(a);
-                saved++;
+            java.util.Optional<Article> existing = (owner == null)
+                    ? articles.findByFeedAndLinkAndOwnerIsNull(feed, r.link())
+                    : articles.findByFeedAndLinkAndOwner(feed, r.link(), owner);
+            if (existing.isPresent()) {
+                backfill(existing.get(), r); // fill in fields added after the article was first stored
+                continue;
             }
+            Article a = new Article(feed, owner, r.link(), r.title(), r.author(), r.date(), r.attachments());
+            a.setCategories(r.categories());
+            a.setEnclosures(r.enclosures());
+            a.setContent(r.content());
+            a.setContentText(com.example.headlines.ArticleHtml.toPlainText(r.content())); // for the FT index
+            articles.save(a);
+            saved++;
         }
         feed.setLastFetched(Instant.now());
         feeds.save(feed);
         return saved;
+    }
+
+    /** Populate fields that were added to {@link Article} after it was first stored (categories,
+     *  enclosures) from a fresh fetch, so pre-existing articles gain them on re-fetch rather than only new
+     *  ones. Only fills blanks — never overwrites, and never churns when the feed genuinely has none. */
+    private void backfill(Article a, Raw r) {
+        boolean changed = false;
+        if (isBlank(a.getCategories()) && !r.categories().isBlank()) {
+            a.setCategories(r.categories());
+            changed = true;
+        }
+        if (isBlank(a.getEnclosures()) && !r.enclosures().isBlank()) {
+            a.setEnclosures(r.enclosures());
+            if (!a.isAttachments()) a.setAttachments(true); // keep the indicator/filter in sync
+            changed = true;
+        }
+        if (changed) articles.save(a);
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     private static LocalDateTime toLocalDateTime(Date d) {

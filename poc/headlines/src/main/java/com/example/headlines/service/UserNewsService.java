@@ -171,6 +171,7 @@ public class UserNewsService {
                     a.getLink(), a.isAttachments());
             item.setContent(a.getContent());
             item.setCategories(a.getCategories());
+            item.setEnclosures(NewsItem.decodeEnclosures(a.getEnclosures()));
             item.setLabels(resolveLabels(st, userLabels));
             out.add(item);
         }
@@ -345,6 +346,8 @@ public class UserNewsService {
                         a.getLink(), a.isAttachments());
                 item.setContent(a.getContent());
                 item.setCategories(a.getCategories());
+                item.setEnclosures(NewsItem.decodeEnclosures(a.getEnclosures()));
+            item.setEnclosures(NewsItem.decodeEnclosures(a.getEnclosures()));
                 item.setLabels(resolveLabels(st, userLabels));
                 out.add(item);
             }
@@ -398,6 +401,7 @@ public class UserNewsService {
                     a.getLink(), a.isAttachments());
             item.setContent(a.getContent());
             item.setCategories(a.getCategories());
+            item.setEnclosures(NewsItem.decodeEnclosures(a.getEnclosures()));
             item.setLabels(resolveLabels(st, userLabels));
             out.add(item);
         }

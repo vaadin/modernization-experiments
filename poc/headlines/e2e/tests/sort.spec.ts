@@ -45,11 +45,15 @@ async function setSort(page: Page, label: string, want: 'asc' | 'desc' | null) {
   expect(await sortDir(page, label)).toBe(want);
 }
 
-/** Reset to the Date-only default: clear every text-headed sorter except Date. */
+/** Reset to the Date-only default: clear whatever sorters are active (whatever their header, incl. the
+ *  icon columns ★/📎) except Date, then make sure Date is descending. Robust to any leftover sort. */
 async function resetToDateOnly(page: Page) {
-  for (const label of ['Title', 'Feed', 'Author', 'Category', 'Status', 'Location']) {
-    await setSort(page, label, null);
+  for (let i = 0; i < 10; i++) {
+    const extra = (await activeSortCols(page)).filter((h) => h !== 'Date');
+    if (extra.length === 0) break;
+    for (const h of extra) await setSort(page, h, null);
   }
+  await setSort(page, 'Date', 'desc');
 }
 
 test.beforeEach(async ({ page }) => {

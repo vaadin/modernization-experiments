@@ -99,6 +99,25 @@ class NewsItemTest {
     }
 
     @Test
+    void enclosuresEncodeDecodeRoundTrip() {
+        var list = java.util.List.of(
+                new NewsItem.Enclosure("https://x/ep.mp3", "audio/mpeg", 24_000_000L),
+                new NewsItem.Enclosure("https://x/t.pdf", "application/pdf", 0)); // unknown size
+        var back = NewsItem.decodeEnclosures(NewsItem.encodeEnclosures(list));
+        assertEquals(2, back.size());
+        assertEquals("https://x/ep.mp3", back.get(0).url());
+        assertEquals("audio/mpeg", back.get(0).type());
+        assertEquals(24_000_000L, back.get(0).length());
+        assertEquals("https://x/t.pdf", back.get(1).url());
+        assertEquals("application/pdf", back.get(1).type());
+        assertEquals(0L, back.get(1).length());
+
+        assertEquals("", NewsItem.encodeEnclosures(java.util.List.of()));
+        assertTrue(NewsItem.decodeEnclosures("").isEmpty());
+        assertTrue(NewsItem.decodeEnclosures(null).isEmpty());
+    }
+
+    @Test
     void identityIsByIdSoStateChangesPreserveEquality() {
         NewsItem a = new NewsItem(7, "T", "A", "C", "F", null, State.UNREAD, false, null, "https://x", false);
         NewsItem sameId = new NewsItem(7, "different", "z", "z", "z", null, State.READ, true, "#fff", "https://y", true);
