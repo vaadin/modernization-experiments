@@ -1323,6 +1323,23 @@ _(This section is the point of the experiment and grows as we go.)_
   (user's words): per-feed reading config is "labour of love… probably nobody needs it." Fidelity to
   intent beats fidelity to the preferences tree; a faithful migration is allowed to leave 2009's
   seldom-touched options on the floor.
+- **A real parity gap, recorded rather than papered over: two "smart folder" models.** RSSOwl has *no*
+  built-in-vs-user distinction — **every** smart folder (Unread News, Recent News, News with Attachments,
+  Sticky News, Labeled News) is an ordinary **search mark** built in one dialog (`SearchMarkDialog`) from
+  **conditions over structured `INews` fields**: `HAS_ATTACHMENTS`, `IS_FLAGGED` (sticky), `STATE`,
+  `LABEL`, plus feed/age/author/category — each a *field + operator + value*, combined with *match all /
+  match any*. The five "defaults" are just search marks seeded on first run via bundled OPML
+  `<savedsearch>` entries, and are fully editable, renameable and deletable like any the user makes. Our
+  app instead **splits smart folders in two**: (a) those same five as **hard-coded in-memory predicates**
+  (`HeadlinesView.SAVED` → `savedPredicate(...)`), fixed and not user-editable/creatable; and (b) user
+  **saved searches that are full-text (Lucene) only** — which *cannot* express structured conditions like
+  "has attachments = true", "state = unread" or "is sticky". Consequence: a user **cannot recreate the
+  five** through the UI, and the two kinds behave differently. The missing piece is RSSOwl's **condition
+  builder over structured fields**; closing the gap means adding one (field/operator/value, multi-
+  condition, match all/any) and re-seeding the five as normal saved searches created through it. This was
+  a **deliberate scope decision, not an oversight** — logged here as a known divergence. (Related honest
+  note: "attachment" was unified to mean *has an openable enclosure* — the `HAS_ATTACHMENTS` flag alone,
+  which older stored rows can carry without a retrievable enclosure URL, is not enough to open anything.)
 
 ---
 
