@@ -132,7 +132,7 @@ public class HeadlinesView extends Div {
     private final Map<Row.GroupRow, List<Row>> children = new HashMap<>();
     private Grid.Column<Row> dateColumn;
     private Grid.Column<Row> feedColumn;      // auto-shown for aggregate selections (RSSOwl synthetic rule)
-    private boolean userFeedColumn;           // user forced the Feed column on via the Columns menu
+    private Boolean userFeedColumn;           // Feed column mode: null=auto, TRUE=forced on, FALSE=forced off
     private boolean aggregateSelection = true; // current selection spans >1 feed (folder/saved/bin/all)
     private boolean adjustingDateSort; // re-entrancy guard while swapping the date null policy
     private List<Grid.Column<Row>> columnOrder; // current left-to-right order, for persistence
@@ -891,6 +891,7 @@ public class HeadlinesView extends Div {
         addColumnToggle(cols, "author", "Author");
         addColumnToggle(cols, "category", "Category");
         addColumnToggle(cols, "sticky", "Sticky");
+        addColumnToggle(cols, "attachments", "Attachments");
         addColumnToggle(cols, "status", "Status");
         addColumnToggle(cols, "location", "Location");
 
@@ -983,6 +984,7 @@ public class HeadlinesView extends Div {
         boolean isFeed = "feed".equals(key);
         MenuItem item = menu.addItem(label, e -> {
             if (isFeed) {
+                // An explicit toggle takes over from the auto behaviour (tri-state -> forced on/off).
                 userFeedColumn = e.getSource().isChecked();
                 updateFeedColumnVisibility();
             } else {
@@ -991,14 +993,17 @@ public class HeadlinesView extends Div {
             persistColumnLayout();
         });
         item.setCheckable(true);
-        item.setChecked(isFeed ? userFeedColumn : col.isVisible());
+        item.setChecked(isFeed ? feedColumn.isVisible() : col.isVisible());
         item.setKeepOpen(true);           // let the user toggle several without reopening the menu
     }
 
-    /** Show the Feed column when the user forced it on, or when the current selection spans multiple feeds
-     *  (a folder, saved search, bin, or the whole archive) — matching RSSOwl's synthetic Feed column. */
+    /** Decide the Feed column's visibility. If the user has explicitly toggled it ({@code userFeedColumn}
+     *  non-null) that wins; otherwise it auto-shows for aggregate selections (folder / saved search / bin /
+     *  the whole archive) and hides for a single feed — RSSOwl's synthetic Feed column. */
     private void updateFeedColumnVisibility() {
-        if (feedColumn != null) feedColumn.setVisible(userFeedColumn || aggregateSelection);
+        if (feedColumn != null) {
+            feedColumn.setVisible(userFeedColumn != null ? userFeedColumn : aggregateSelection);
+        }
     }
 
     // --- top-right pane: headlines ---
@@ -1076,6 +1081,16 @@ public class HeadlinesView extends Div {
         headlines.addColumn(row -> row instanceof Row.ItemRow ir ? ir.news().location() : "")
                 .setHeader("Location").setKey("location").setWidth("220px").setFlexGrow(0).setResizable(true)
                 .setComparator(rowCmp(Comparator.comparing(NewsItem::location, String.CASE_INSENSITIVE_ORDER)))
+                .setSortable(true).setVisible(false);
+
+        // Attachments (RSSOwl NewsColumn.ATTACHMENTS): an icon-only column — faint 📎 header + "Attachments"
+        // tooltip, 📎 in rows whose feed item carries an enclosure. Hidden by default.
+        Span attHeader = new Span("📎");
+        attHeader.getElement().setAttribute("title", "Attachments");
+        attHeader.getStyle().set("opacity", "0.4");
+        headlines.addColumn(row -> row instanceof Row.ItemRow ir && ir.news().attachments() ? "📎" : "")
+                .setHeader(attHeader).setKey("attachments").setWidth("56px").setFlexGrow(0).setResizable(false)
+                .setComparator(rowCmp(Comparator.comparing(n -> !n.attachments()))) // with-attachments first when asc
                 .setSortable(true).setVisible(false);
 
         headlines.setPartNameGenerator(row -> {
@@ -1212,6 +1227,8 @@ public class HeadlinesView extends Div {
      *  the new defaults exactly once. v2 = the RSSOwl column-parity change (Category=tags, +Location,
      *  Sticky default-on, Feed auto). Persisted as a synthetic, non-column pref row. */
     private static final String COLUMN_PREF_VERSION = "__colver:2";
+    /** Sentinel pref key prefix carrying the Feed column's tri-state mode (auto|on|off). */
+    private static final String FEED_MODE_KEY = "__feedmode:";
 
     private void persistColumnLayout() {
         List<UserNewsService.ColumnState> states = new ArrayList<>();
@@ -1221,7 +1238,10 @@ public class HeadlinesView extends Div {
             states.add(new UserNewsService.ColumnState(c.getKey(), pos++, c.getWidth(), c.isVisible()));
         }
         // Version stamp (not a real column) so a future default change can invalidate this layout.
-        states.add(new UserNewsService.ColumnState(COLUMN_PREF_VERSION, pos, null, true));
+        states.add(new UserNewsService.ColumnState(COLUMN_PREF_VERSION, pos++, null, true));
+        // Feed column mode is separate from its (auto-managed) per-selection visibility.
+        String mode = userFeedColumn == null ? "auto" : (userFeedColumn ? "on" : "off");
+        states.add(new UserNewsService.ColumnState(FEED_MODE_KEY + mode, pos, null, true));
         news.saveColumnLayout(subject, states);
     }
 
@@ -1236,6 +1256,13 @@ public class HeadlinesView extends Div {
             if (!prefs.isEmpty()) persistColumnLayout();
             return;
         }
+
+        // Restore the Feed column's tri-state mode (auto|on|off); absent -> auto.
+        prefs.stream().map(UserNewsService.ColumnState::key).filter(k -> k.startsWith(FEED_MODE_KEY)).findFirst()
+                .ifPresent(k -> {
+                    String mode = k.substring(FEED_MODE_KEY.length());
+                    userFeedColumn = "auto".equals(mode) ? null : "on".equals(mode);
+                });
 
         // Width + visibility per column.
         for (UserNewsService.ColumnState cs : prefs) {
