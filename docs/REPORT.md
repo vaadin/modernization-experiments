@@ -1340,6 +1340,16 @@ _(This section is the point of the experiment and grows as we go.)_
   a **deliberate scope decision, not an oversight** — logged here as a known divergence. (Related honest
   note: "attachment" was unified to mean *has an openable enclosure* — the `HAS_ATTACHMENTS` flag alone,
   which older stored rows can carry without a retrievable enclosure URL, is not enough to open anything.)
+- **The report was the deliverable — but the PoC became a genuinely usable reader, and that's itself a
+  finding.** The app existed only to *generate evidence* for the feasibility question, yet each "let's
+  verify this migrates" (real feeds, per-user state, search, filters, labels, bins, keyboard nav, column
+  parity, attachments) turned into a working subsystem. That the by-product ended up genuinely usable is
+  arguably the strongest data point for the thesis: the migration isn't just feasible, it's fast enough
+  that a faithful, usable result falls out of the verification work itself — **with the two standing
+  caveats** kept next to it so we don't oversell: (1) completeness needs a source-literate human reviewer
+  (invented taxonomies, phantom attachments, the smart-folder split were all human catches), and (2) a
+  usable *slice* is not a migrated *RCP app* — the workbench/command/OSGi surface remains the real
+  remaining mass. _(TODO tomorrow: work this into the report prose, not just the findings list.)_
 
 ---
 
