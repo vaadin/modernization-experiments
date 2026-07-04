@@ -99,7 +99,12 @@ public class NewsItem {
      *  single-colour render sites and the "Labeled" smart-folder predicate (labelColor()!=null) working. */
     public String labelColor() { return labels.isEmpty() ? labelColor : labels.get(0).color(); }
     public String link() { return link; }
-    public boolean attachments() { return attachments; }
+    /** True when the item has an openable attachment. Derived from {@link #enclosures()} so that the
+     *  "News with Attachments" smart folder, the 📎 column, sorting, and the reader all agree — and every
+     *  item flagged as having an attachment actually has an enclosure URL to open. (The constructor's
+     *  {@code attachments} flag is only a fetch-time hint; enclosures set right after are the source of
+     *  truth.) */
+    public boolean attachments() { return !enclosures.isEmpty(); }
     /** The item's downloadable attachments (may be empty). */
     public List<Enclosure> enclosures() { return enclosures; }
     public void setEnclosures(List<Enclosure> encs) {
