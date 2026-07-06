@@ -4,7 +4,7 @@
 > experiment ran — dead ends, wrong turns, corrections and all, on purpose. It is deliberately
 > verbose and chronological.
 >
-> **If you want the story, read [`REPORT.md`](REPORT.md) first** — the polished write-up that
+> **If you want the story, read [`REPORT-INHOUSE.md`](REPORT-INHOUSE.md) first** — the polished write-up that
 > draws on this journal. This file is here so every claim in the report can be traced back to
 > what actually happened, with which fix. See [`../README.md`](../README.md) for the experiment
 > brief and ground rules.

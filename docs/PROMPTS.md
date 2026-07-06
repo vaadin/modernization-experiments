@@ -14,7 +14,7 @@
 Prompts from the earlier sessions (2026-06-23 → 26) are **reconstructed from session notes** — the
 intent and most exact phrasings are preserved, but treat those as close paraphrases, not transcripts.
 The detailed account of *what each prompt produced* — including the dead ends — lives in the
-day-by-day [`JOURNAL.md`](JOURNAL.md); the story and honest findings are in [`REPORT.md`](REPORT.md).
+day-by-day [`JOURNAL.md`](JOURNAL.md); the story and honest findings are in [`REPORT-INHOUSE.md`](REPORT-INHOUSE.md).
 This file is the index of inputs.
 
 ---

@@ -70,9 +70,10 @@ _(Filled in as the experiment progresses.)_
 - [x] Runnable code in this repo with a reproducible README.
 - [x] The AI prompts / skills / instructions used, included in the repo — see [`docs/PROMPTS.md`](docs/PROMPTS.md).
 - [x] A write-up (the story + the honest findings) for the curator and marketing —
-      [`docs/REPORT.md`](docs/REPORT.md), backed by the day-by-day [`docs/JOURNAL.md`](docs/JOURNAL.md).
+      [`docs/REPORT-INHOUSE.md`](docs/REPORT-INHOUSE.md), backed by the day-by-day
+      [`docs/JOURNAL.md`](docs/JOURNAL.md). _(An outward-facing edit is in progress.)_
 - [x] One clear call-to-action — **"run this on your own codebase"** (repo as a worked example +
-      prompts as the method), the report's [closing section](docs/REPORT.md#try-it-on-your-own-codebase).
+      prompts as the method), the report's [closing section](docs/REPORT-INHOUSE.md#try-it-on-your-own-codebase).
       Final CTA wording is a marketing decision to be iterated outside this write-up.
 
 ## What makes an experiment fail its purpose
@@ -102,7 +103,7 @@ sticky-row highlight, label colours, state icons), an in-cell read/sticky toggle
 context menu, and a reader pane that updates on selection via Vaadin Signals.
 
 The full story — what the AI/tooling did well, what it got wrong, and what's genuinely hard — is in
-[`docs/REPORT.md`](docs/REPORT.md). "Before" (the original SWT/RCP app) and "after" (this POC)
+[`docs/REPORT-INHOUSE.md`](docs/REPORT-INHOUSE.md). "Before" (the original SWT/RCP app) and "after" (this POC)
 screenshots are in [`docs/before/`](docs/before/) and [`docs/after/`](docs/after/).
 
 > Reproducing on **your own** SWT/RCP code: the method (and its traps) is documented in the report
