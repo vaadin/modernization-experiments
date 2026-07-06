@@ -69,9 +69,11 @@ _(Filled in as the experiment progresses.)_
 
 - [x] Runnable code in this repo with a reproducible README.
 - [x] The AI prompts / skills / instructions used, included in the repo — see [`docs/PROMPTS.md`](docs/PROMPTS.md).
-- [x] A write-up draft (the story + the honest findings) for the curator and marketing — [`docs/REPORT.md`](docs/REPORT.md).
-- [ ] One clear call-to-action defined with marketing — ideally "run this on your own
-      codebase" (repo + prompts) rather than "contact sales."
+- [x] A write-up (the story + the honest findings) for the curator and marketing —
+      [`docs/REPORT.md`](docs/REPORT.md), backed by the day-by-day [`docs/JOURNAL.md`](docs/JOURNAL.md).
+- [x] One clear call-to-action — **"run this on your own codebase"** (repo as a worked example +
+      prompts as the method), the report's [closing section](docs/REPORT.md#try-it-on-your-own-codebase).
+      Final CTA wording is a marketing decision to be iterated outside this write-up.
 
 ## What makes an experiment fail its purpose
 

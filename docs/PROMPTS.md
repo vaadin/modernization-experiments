@@ -13,8 +13,9 @@
 **Honesty note.** Prompts from **2026-06-29 onward** are reproduced **verbatim** (typos and all).
 Prompts from the earlier sessions (2026-06-23 → 26) are **reconstructed from session notes** — the
 intent and most exact phrasings are preserved, but treat those as close paraphrases, not transcripts.
-The detailed account of *what each prompt produced* — including the dead ends — lives in
-[`REPORT.md`](REPORT.md); this file is the index of inputs.
+The detailed account of *what each prompt produced* — including the dead ends — lives in the
+day-by-day [`JOURNAL.md`](JOURNAL.md); the story and honest findings are in [`REPORT.md`](REPORT.md).
+This file is the index of inputs.
 
 ---
 
@@ -78,6 +79,56 @@ instruction shaped every report entry.
 - *"Can you start the original application ?"*
 - *"Are you still writing decisions and prompts into the report?"*
 - *"yes, please do add it."* → this file.
+
+### Days 6–17 — the feature-parity build *(2026-06-30 → 2026-07-04)*
+
+> These sessions worked down the "what's still missing vs. the original?" gap list one subsystem at a
+> time. The driving prompt was the same recurring pattern each time — *"close the next gap"* /
+> *"what's missing?"* / *"the original does X, add it"* — so rather than repeat it, here is what each
+> session closed. The full account (and the bugs each surfaced) is in [`JOURNAL.md`](JOURNAL.md),
+> "Day 6" … "Day 17". (Journal "Day N" is a work-session index, not a strict calendar day.)
+
+- **Seed a user 1:1 from RSSOwl's own OPML** (`default_feeds.xml`) instead of a hand-built taxonomy →
+  nested folders, exact original order.
+- **"Make the reader actually read"** → inline feed-HTML rendering, sanitized through jsoup.
+- **Direction-aware null date sorting** → the last in-slice stretch item.
+- **"Add the search RSSOwl bundles Lucene for"** → real full-text search (H2 `FullTextLucene`); a
+  four-bug debugging trail recorded verbatim in the journal.
+- **OPML import/export UI**, **"new since last visit" notifications**, **periodic background refresh**,
+  and **live in-session notifications** → the notifications story, completed.
+- **"The biggest missing feature — the rules engine"** → news filters/actions (conditions → actions).
+- **Label management** (custom + multi-label), **saved searches**, and **news bins** → the last
+  out-of-slice subsystems. *"every RSSOwl subsystem that makes sense on the web is now built."*
+
+### Day 18 — the nitpicking reviewer pass *(verbatim)*
+
+The pass that produced the defect table in the report. Prompt reproduced verbatim (abbreviated):
+
+> *"assume the role of a thorough reviewer… use screenshots and playwright and computer use to operate
+> both the old and the new application. Be nitpicking… why it seems impossible that the old application
+> and the Alice account can never have the same feeds… the number of news items seems to never be the
+> same… when reading one, the number of unread items does not go down… the font is always bold [old] but
+> often not in Vaadin… Why did I not see 'Login:' dialogs… Why is the 'add feed' dialog so narrow…? Why
+> does a single click not select…? Can we mimic the original with multi-select on Command/Shift instead
+> of the checkbox? … maintain a list with defects … and how they can be mitigated."*
+
+Earlier fidelity checks in the same spirit, recorded verbatim in the journal:
+- *"there are fewer channels in the Vaadin version. Why?"* → the missing-channels fidelity fix.
+- *"you are removing HierarchyFormat.FLATTENED and I wonder why?"* → caught a feature dropped for the
+  wrong reason (it wouldn't compile) rather than fixing the import.
+
+### Days 19–21 — feed-parsing divergence, keyboard nav, the three "filters" *(verbatim)*
+
+- **Day 19** — on why the original fumbles a modern CDN feed the Vaadin app handles: *"how does the
+  original mess this up?"* → the header-/URL-driven-identification vs. content-driven-parsing finding.
+- **Day 20** — settling auto-read behaviour. The human killed a wrong first cut: *"showing the text
+  after 5 s and marking it read by then makes no sense, whereas showing it immediately and assuming it
+  was read after that time is sound."* And the scoping call to drop per-feed granularity: per-feed
+  reading config is *"labour of love, not anything people would use on a regular basis — probably
+  nobody needs it."*
+- **Day 21** — disambiguating three features all called "filter"; the fix aligned the toolbar box to
+  RSSOwl's live, local **Filter Bar** (default scope = title), and added a Playwright **E2E test tier**
+  for UI-wiring bugs that headless JUnit structurally can't catch.
 
 ---
 
