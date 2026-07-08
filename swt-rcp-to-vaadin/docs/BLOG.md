@@ -1,12 +1,4 @@
-<!--
- Copyright (c) 2026 Vaadin Ltd.
- This program and the accompanying materials are made available under the
- terms of the Eclipse Public License v1.0 — SPDX-License-Identifier: EPL-1.0
-
- DRAFT blog post. First-person, developer-audience narrative.
--->
-
-# I quit the algorithm for RSS. The classic reader won't run in 2026 — so I rebuilt it in a browser tab.
+# The classic Java RSS reader I found won't run in 2026 — so I rebuilt it in a browser tab.
 
 *I came to RSS about twenty years late. When I finally went looking for a good reader, one beloved
 old Eclipse desktop app kept turning up on every "best of" list — [RSSOwl](https://github.com/rssowl/RSSOwl) —
@@ -16,14 +8,15 @@ came across in an afternoon, what fought me, and what turned out to be impossibl
 
 ---
 
-Quitting the algorithm sounds grand; for me it started with something dumber — newsletters. I
-follow a fair amount of developer stuff (the Vaadin blog, the Spring blog, a couple of Java ones,
+I follow a fair amount of developer stuff (the Vaadin blog, the Spring blog, a couple of Java ones,
 Hacker News), and half of it only really arrives as email now. My inbox had turned into an
 unread-content graveyard. RSS promised to pull all of it into one place, newest-first, without
 handing anyone my email address — and let me actually get through it.
 
 So I went looking for something to *read* it in. One name kept turning up, on nearly every "best
-RSS reader" list and in half the old forum threads: RSSOwl, a gorgeous Eclipse desktop reader with
+RSS reader" list (it's still near the top of [SourceForge's Java RSS readers for
+Mac](https://sourceforge.net/directory/rss-feed-readers/java/?os=mac)) and in half the old forum
+threads: RSSOwl, a gorgeous Eclipse desktop reader with
 a classic three-pane layout — a tree of feeds on the left, a sortable table of headlines
 top-right, an article reader below. The lists tended to add the same asterisk — *needs Java, looks
 dated* — which I ignored. I downloaded it. Nothing happened. It simply won't launch on a 2026 Mac.
@@ -60,7 +53,7 @@ So, as a web developer, I couldn't help but ask myself:
 > menu, and an article reader — and have an AI rebuild it in the browser? Maybe even make it
 > multi-user, so friends could keep their own feed lists? And where would it fall apart?**
 
-I decided to find out, leaning on Claude Code to do the typing and keeping an honest tally of what
+I decided to find out, leaning on Claude Code to do the typing and keeping a tally of what
 worked and what didn't. I targeted Vaadin 25 (Java, server-side UI — no JavaScript rewrite, which
 was the whole point). The short version: the screen moves, and most of it moves surprisingly fast.
 But "where does it fall apart" has real answers — and the most interesting one has nothing to do
@@ -81,7 +74,7 @@ Most of it came over quickly:
   listeners. Vaadin 25 has a better answer — **Signals**. The selected headline lives in a
   `ValueSignal<NewsItem>`, and the reader binds to it reactively (`Signal.effect(...)`); there's no
   manual "when the selection changes, go update the reader" plumbing. Cleaner than the desktop
-  original, honestly — but I only found it because I *checked*, which is a theme below.
+  original — but I only found it because I *checked*, which is a theme below.
 - **Sorting was almost free.** Click-to-sort headers and the little sort arrow are built into the
   `Grid`; you just hand each column a `Comparator`.
 - **The right-click menu ported faithfully.** A `GridContextMenu` rebuilt on each open reproduced
@@ -104,8 +97,8 @@ accounting for that, the difference is enormous.)
 
 ## Where the AI let me down
 
-This is the part most write-ups skip, and it's the part I'd most want to read. The common thread:
-none of these came from what the AI *knew* — they surfaced from the compiler, from *running the
+This is the part most articles skip, and it's the part I'd most want to read. The common thread:
+none of the issues below came from what the AI *knew* — they surfaced from the compiler, from *running the
 app* (sometimes the AI itself caught them, by driving the app with Playwright), or from me
 comparing against how the original behaved.
 
@@ -138,7 +131,7 @@ comparing against how the original behaved.
 - **A Signals gotcha you can't guess.** Reading the selection from a background timer with
   `signal.get()` throws — `get()` sets up reactive dependency tracking and is illegal outside an
   effect. From a plain callback you must use `signal.peek()`. Obvious in hindsight, invisible
-  beforehand. Again, the AI caught it using Playwright.
+  beforehand — and, again, only running the app surfaced it.
 - **A sorting subtlety it got quietly wrong.** RSSOwl always sorts undated items to the bottom,
   either direction. Vaadin gives a column one comparator and *reverses* it for a descending sort, so
   my `nullsLast` flipped to `nullsFirst` and empty-date rows leapt to the top of the default
@@ -179,25 +172,13 @@ A few things didn't fight me so much as slam a door. Plainly:
   per-row colour and the selected-row state don't compose cleanly through CSS parts, so I settled
   for a compromise rather than a perfect match.
 
-None of these are really the web framework's fault. They're the honest edges of dragging a
+None of these are really the web framework's fault. They're the real edges of dragging a
 20-year-old desktop app onto today's platform. Knowing where those edges are before you start is
 worth more than any feature list.
 
-## The nice surprise: a decade of fixes, for free
+## A bonus I didn't plan for
 
-One story cuts the other way, and it's my favourite. Remember the Vaadin blog — one of the feeds I
-wanted from the start? I tried adding it (`vaadin.com/blog/feed`) to both apps. The *original*
-RSSOwl fumbles it: it can't even confidently decide the URL *is* a feed, because its 2009-era logic
-identifies feeds by an HTTP `Content-Type` header and a file extension that this modern, CDN-hosted
-endpoint just doesn't provide. Perfectly reasonable assumptions back then; broken on today's web.
-
-My browser version doesn't even notice the problem — not because I was clever, but because the
-modern library it uses (ROME) figures out a feed from its actual *content*, sniffing the XML from
-the bytes rather than trusting HTTP labels. Just by using a current stack, the rebuild inherited a
-decade of the ecosystem quietly getting more robust. That's an underrated part of modernizing: you
-don't only move the app, you leave a pile of accumulated brittleness behind.
-
-And a bonus I didn't plan for. I only set out to prove the *main screen* could move. But every time
+I only set out to prove the *main screen* could move. But every time
 I checked "could this part move too?" — logins, full-text search, filters, labels, keyboard
 shortcuts — it turned into a working feature, and I ended up with the multi-user feed reader I'd
 half-jokingly asked for, one I'd actually use. That the real thing kind of *fell out* of just
@@ -227,15 +208,25 @@ matters** — the AI won't.
 
 ## Want to poke at it?
 
-It's all up on GitHub, and the fun part is you can run it in about a minute:
+It's all up on GitHub:
 
 ```sh
-git clone <this-repo>
-cd swt-rcp-to-vaadin-modernization/poc/headlines
+git clone https://github.com/vaadin/modernization-experiments.git
+cd modernization-experiments/swt-rcp-to-vaadin/poc/headlines
 ./mvnw spring-boot:run        # needs a JDK 21+; the first run pulls the frontend toolchain
 ```
 
-Then open <http://localhost:8080>.
+One caveat, and it's the price of making this multi-user: the app gates every page
+behind an OIDC login, so it won't just open — it needs a **Keycloak** to authenticate against.
+Out of the box `application.properties` points at *my* Keycloak, which won't do you any good, so
+you'll need to stand up your own. The repo has a one-shot [`keycloak/setup-keycloak.sh`](../keycloak/setup-keycloak.sh)
+that provisions the realm, a confidential client, and two test users (`alice`/`alice`, `bob`/`bob`)
+against a local Keycloak; then point `spring.security.oauth2.client.provider.keycloak.issuer-uri`
+at your instance and pass the client secret via the `KEYCLOAK_CLIENT_SECRET` env var (see
+[`run.sh`](../poc/headlines/run.sh)). It's a few minutes of setup, not the one-command kind — the
+multi-user angle was a bonus I chased, and this is what it costs.
+
+Once Keycloak is up and the app is running, open <http://localhost:8080>, and log in as `alice`.
 
 If you've got your own stranded desktop app, the prompts I used are in the repo too — the part
 that's genuinely reusable: build your app from source first to prove it still runs, map its tables

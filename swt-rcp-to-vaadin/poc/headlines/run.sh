@@ -8,11 +8,11 @@
 #
 # Then just: ./run.sh
 #
+#
+# Requires a JDK 21+ on PATH (or JAVA_HOME pointing at one).
+#
 set -euo pipefail
 cd "$(dirname "$0")"
-
-# arm64 JDK 21 (not the Java 26 sdkman default)
-export JAVA_HOME="${JAVA_HOME:-/Users/ehaase/Library/Java/JavaVirtualMachines/openjdk-21.0.1/Contents/Home}"
 
 if [[ -f .env.local ]]; then
   set -a; . ./.env.local; set +a
@@ -20,4 +20,4 @@ else
   echo "WARNING: poc/headlines/.env.local not found — KEYCLOAK_CLIENT_SECRET unset; OIDC login will fail." >&2
 fi
 
-exec ./mvnw -o spring-boot:run
+exec ./mvnw spring-boot:run
