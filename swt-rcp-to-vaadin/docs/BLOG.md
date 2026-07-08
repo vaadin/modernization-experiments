@@ -234,6 +234,10 @@ and trees to `Grid`/`TreeGrid` the same way, query the framework's live docs (th
 instead of trusting the AI's memory, and verify everything by actually running it. They're not a
 magic recipe, but take them as inspiration for your own run at it.
 
+Hit a wall with a weird framework quirk? Drop it in the **[Vaadin Forum - Java developer discussions](https://vaadin.com/forum)**—the community and our team are always around to help untangle edge cases. 
+
+If you’re staring down a massive legacy codebase and need a real reality check—whether that's an architectural gut-check or mapping out a full migration strategy—just reach out to us directly via our **[Contact Page](https://vaadin.com/upgrade)**. We'll help you figure out the best way to finally get your app off the desktop and onto the modern web.
+
 I went in expecting to prove it *couldn't* really be done. I came out with the old screen running
 in a browser tab — no install, no Rosetta, no 32-bit ghosts — a much clearer sense of exactly where
 the hard parts are, and, fittingly, a feed reader I'll actually use. Late adopter, indeed.
