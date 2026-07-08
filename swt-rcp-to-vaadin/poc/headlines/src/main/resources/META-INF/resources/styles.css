@@ -1,0 +1,101 @@
+/* Owner-draw equivalents for the headline grid, driven by Grid.setPartNameGenerator(...).
+   RSSOwl painted these in an SWT.EraseItem listener; here they are plain CSS on grid cell parts. */
+
+/* Bold = unread (RSSOwl: bold font for NEW/UPDATED/UNREAD). */
+vaadin-grid::part(unread) {
+    font-weight: 600;
+}
+
+/* Read rows are de-emphasised (greyed), like RSSOwl. Colour inherits into the slotted title text;
+   an explicitly-labelled title keeps its own colour. */
+vaadin-grid::part(read) {
+    color: var(--vaadin-text-color-secondary, #8a8a8a);
+}
+
+/* Sticky/flagged rows get RSSOwl's pale-yellow background (RGB 255,255,180).
+   NOTE (finding): the Vaadin MCP styling docs say to set row backgrounds via
+   --vaadin-grid-cell-background, but under the new Aura theme that custom property is ignored —
+   the cell's background-color is computed independently (to white). So we set background-color
+   directly on the part. A docs-vs-Aura mismatch that only surfaced by running it. */
+vaadin-grid::part(sticky) {
+    --vaadin-grid-cell-background: #fffdb4;     /* documented path — no effect under Aura */
+    background-color: #fffdb4 !important;       /* needs !important to beat Aura's internal cell bg */
+}
+
+/* Custom selection highlight (the grid runs in NONE mode; we mark selected rows ourselves). */
+vaadin-grid::part(selected) {
+    background-color: var(--lumo-primary-color-10pct, #d6e4f5) !important;
+}
+
+/* Group header rows (RSSOwl's EntityGroup rows: bold, tinted background). */
+vaadin-grid::part(group) {
+    font-weight: 600;
+    background-color: #eef2f7 !important;
+}
+
+/* Keyboard cursor: a clear focus ring on the focused cell (base token, Aura-safe). The whole focused
+   row is also highlighted via the "selected" part, since cell-focus drives our selection. */
+vaadin-grid::part(focused-cell)::before {
+    outline: 2px solid var(--vaadin-focus-ring-color, #0b57d0);
+    outline-offset: -2px;
+    pointer-events: none;
+}
+
+/* Left feeds-tree: folders/feeds with unread items in bold (RSSOwl bolds anything with unread),
+   normal + greyed once everything is read. */
+vaadin-grid::part(feed-category),
+vaadin-grid::part(feed-unread) {
+    font-weight: 600;
+}
+vaadin-grid::part(feed-category-read) {
+    font-weight: 400;
+    color: var(--vaadin-text-color-secondary, #888);
+}
+
+/* Saved-search smart folders (Unread/Today/...) in italic to set them apart; bold when they hold
+   unread news (like folders/feeds), normal + greyed once everything is read. */
+vaadin-grid::part(feed-saved) {
+    font-style: italic;
+    font-weight: 600;
+}
+vaadin-grid::part(feed-saved-read) {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--vaadin-text-color-secondary, #888);
+}
+
+/* Reader pane: inline article HTML from the feed. Keep images/embeds inside the pane and give the
+   text comfortable measure, so arbitrary feed markup doesn't blow out the layout. */
+.article-content {
+    margin-top: 0.75rem;
+    line-height: 1.5;
+    max-width: 48rem;
+}
+.article-content img,
+.article-content video,
+.article-content iframe {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Reader pane: force an always-visible scrollbar for long articles. macOS uses overlay scrollbars that
+   hide until you scroll; styling ::-webkit-scrollbar opts into a classic, always-shown bar, and
+   scrollbar-gutter reserves the space so text doesn't reflow when it appears. */
+.article-reader {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin; /* Firefox */
+}
+.article-reader::-webkit-scrollbar {
+    width: 12px;
+}
+.article-reader::-webkit-scrollbar-thumb {
+    background: var(--vaadin-border-color, rgba(0, 0, 0, 0.28));
+    border-radius: 6px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+}
+.article-reader::-webkit-scrollbar-thumb:hover {
+    background: var(--vaadin-text-color-secondary, rgba(0, 0, 0, 0.45));
+    background-clip: padding-box;
+    border: 3px solid transparent;
+}

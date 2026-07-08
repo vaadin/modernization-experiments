@@ -1,0 +1,61 @@
+/*
+ * Copyright (c) 2026 Vaadin Ltd.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License v1.0 which accompanies this distribution,
+ * and is available at https://www.eclipse.org/legal/epl-v10.html
+ *
+ * SPDX-License-Identifier: EPL-1.0
+ */
+
+package com.example.headlines;
+
+/**
+ * A node in the left feeds-navigation tree (RSSOwl's {@code BookMarkExplorer}): a {@link Category}
+ * folder or a {@link Feed} under it. The label carries an unread-style count in parentheses, like
+ * RSSOwl ("Business (151)").
+ */
+public sealed interface FeedNode
+        permits FeedNode.Category, FeedNode.Feed, FeedNode.Saved, FeedNode.SavedSearch, FeedNode.Bin {
+
+    String label();
+
+    /** A folder. {@code path} is the full folder path ({@code "Computers/Windows"}) and is the node's
+     *  identity; {@code name} is just the last segment, shown in the tree. Supports nesting so a user's
+     *  tree can mirror the original's nested default folders. */
+    record Category(String path, String name, int count) implements FeedNode {
+        // Unread count in parens, like RSSOwl; hidden when all read.
+        @Override public String label() { return count > 0 ? name + "  (" + count + ")" : name; }
+    }
+
+    /** {@code subscriptionId} ties the node to its persisted {@code Subscription} so drag-and-drop
+     *  reordering can be saved per user. {@code url} is the feed URL (for re-fetching after a
+     *  credentials change); {@code authUsername} is non-null when the feed has stored HTTP
+     *  credentials (a lock is shown in the label, like an authenticated bookmark). */
+    record Feed(String name, String category, int count, long subscriptionId, String url,
+            String authUsername) implements FeedNode {
+        boolean hasAuth() { return authUsername != null && !authUsername.isBlank(); }
+        // {@code count} is the UNREAD count; shown in parens only when > 0 (RSSOwl-style).
+        @Override public String label() {
+            return (hasAuth() ? "🔒 " : "") + name + (count > 0 ? "  (" + count + ")" : "");
+        }
+    }
+
+    /** A saved-search "smart folder" (RSSOwl: Unread News, Today's News, …). {@code key} selects the
+     *  predicate; count shown only when &gt; 0, like RSSOwl. */
+    record Saved(String name, String key, int count) implements FeedNode {
+        @Override public String label() { return count > 0 ? name + "  (" + count + ")" : name; }
+    }
+
+    /** A user-defined saved search (RSSOwl: a persisted search query shown as a folder). {@code query}
+     *  is the Lucene query run when selected; {@code id} ties it to the persisted row for deletion. */
+    record SavedSearch(long id, String name, String query, int count) implements FeedNode {
+        @Override public String label() { return "🔎 " + name + (count > 0 ? "  (" + count + ")" : ""); }
+    }
+
+    /** A news bin (RSSOwl: a container of explicitly-added news). {@code id} ties it to the persisted
+     *  row; selecting it shows its articles. */
+    record Bin(long id, String name, int count) implements FeedNode {
+        @Override public String label() { return "🗄 " + name + "  (" + count + ")"; }
+    }
+}
