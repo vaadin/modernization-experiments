@@ -1,0 +1,41 @@
+SWT/RCP → Vaadin Modernization Experiment
+Copyright (c) 2026 Vaadin Ltd.
+
+This product is licensed under the Eclipse Public License v1.0 (see LICENSE).
+
+------------------------------------------------------------------------------
+Attribution
+------------------------------------------------------------------------------
+
+This project is an experimental re-implementation, in Vaadin Flow, of a slice of
+RSSOwl / RSSOwlnix:
+
+    RSSOwl       https://github.com/rssowl/RSSOwl
+    RSSOwlnix    https://github.com/Xyrio/RSSOwlnix
+    Copyright (c) 2005-2009 RSSOwl Development Team and contributors
+    Licensed under the Eclipse Public License v1.0
+
+The Vaadin code in poc/headlines/ was written independently against Vaadin Flow
+APIs; it shares no source with RSSOwl. What is derived from RSSOwl is structural
+and factual: a small number of behavioral constants (e.g. the 200-items-per-feed
+retention cap).
+
+In addition, poc/headlines/src/main/resources/default_feeds.xml is RSSOwl(nix)'s
+own first-run default-subscriptions OPML, included VERBATIM from RSSOwlnix
+(org.rssowl.ui/default_feeds.xml) under the Eclipse Public License v1.0, so that a
+new user's feed tree mirrors the original application exactly. Its feed URLs are
+RSSOwl's 2009-era list and are mostly defunct.
+
+Should RSSOwl source be ported into this project in the future, the affected
+files will carry the RSSOwl EPL-1.0 copyright header and be credited here.
+
+------------------------------------------------------------------------------
+Third-party dependencies
+------------------------------------------------------------------------------
+
+Vaadin Flow                Apache License 2.0 (core) — https://vaadin.com
+Spring Boot                 Apache License 2.0
+ROME (com.rometools:rome)   Apache License 2.0 — RSS/Atom parsing
+jsoup (org.jsoup:jsoup)     MIT License — HTML sanitization for the reader
+Apache Lucene               Apache License 2.0 — full-text search (via H2 FullTextLucene)
+H2 Database                 EPL 1.0 / MPL 2.0 — embedded database + full-text engine
